@@ -1,0 +1,60 @@
+{%load static%}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LogIn</title>
+    <link rel="stylesheet" href="{% static 'login/css/styleloginmain.css'%}">
+
+</head>
+<body>
+    <div class="container">
+        <div class="screen">
+            <br><br><br><br>
+            <div class="screen__content">
+                
+                    {% if messages %}
+        {% for message in messages %}
+          <div class="alert {{ message.tags }} m-2" id="message" role="alert">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+                <form class="login" action="{% url 'login' %}" method="POST">
+                    {% csrf_token %}
+                    <div class="login__field">
+                        <i class="login__icon fas fa-user"></i>
+                        <input type="text" class="login__input" placeholder="User Name" name="username" required>
+                    </div>
+                    <div class="login__field">
+                        <i class="login__icon fas fa-lock"></i>
+                        <input type="password" class="login__input" placeholder="Password" name="password" required>
+                    </div>
+                    <button class="button login__submit">
+                        <span class="button__text">Sign in</span>
+                        <i class="button__icon fas fa-chevron-right"></i>
+                </form></button>	
+                <center><button class="button login__submit">
+                    <a href="{% url 'signup' %}">
+                        <span class="button__text">Create Account</span>
+                        <i class="button__icon fas fa-chevron-right"></i>
+                </button></center>	
+                <!-- <div class="social-login">
+                    <h3>log in via</h3>
+                    <div class="social-icons">
+                        <a href="#" class="social-login__icon fab fa-instagram"></a>
+                        <a href="#" class="social-login__icon fab fa-facebook"></a>
+                        <a href="#" class="social-login__icon fab fa-twitter"></a>
+                    </div>
+                </div> -->
+            </div>
+            <div class="screen__background">
+                <span class="screen__background__shape screen__background__shape4"></span>
+                <span class="screen__background__shape screen__background__shape3"></span>		
+                <span class="screen__background__shape screen__background__shape2"></span>
+                <span class="screen__background__shape screen__background__shape1"></span>
+            </div>		
+        </div>
+    </div>
+</body>
+</html>

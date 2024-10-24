@@ -1,0 +1,71 @@
+{%load static%}
+<!DOCTYPE html>
+<html>
+<head>
+ <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+ <link href="https://fonts.googleapis.com/css?family=Montserrat:500,700,900|Work+Sans:300" rel="stylesheet">
+ <link rel="stylesheet" href="{% static 'contactus/style.css'%}">
+ <title>Contact Us | BUSIIKA PHARMACY</title>
+</head>
+<body>
+
+<div class="contact-container">
+  <div class="contact-inner-container">
+
+    <div class="contact-info-container">
+      <h1 class="contact-heading">Contact US</h1>
+      <p class="contact-description">
+        We're open for any suggestion or feedback.
+      </p>
+      <div class="line"></div>
+
+      <div class="contact-details">
+        <h3><i class="fa fa-map-maker"></i> Address</h3>
+        <p>BUSIIKA, LUWERO, KAMPALA</p>
+      </div>
+      <hr />
+
+      <div class="contact-details">
+        <h3><i class="fa fa-envelope"></i> Email</h3>
+        <p>busiikapharmac@.ac.ug</p>
+      </div>
+      <hr />
+
+      <div class="contact-details">
+        <h3><i class="fa fa-phone"></i> Lets Talk</h3>
+        <p>+256757051945</p>
+      </div>
+      <hr />
+
+      <div class="social-link-container">
+        <i class="fa fa-instagram"></i>
+        <i class="fa fa-facebook"></i>
+        <i class="fa fa-twitter"></i>
+        <i class="fa fa-linkedin"></i>
+      </div>
+    </div>
+
+    <div class="contact-form">
+      <form class="form" action="https://formspree.io/f/xqkogqdo" method="POST">
+        <div class="form-group">
+          <input type="text" name="name" class="input-field form-input" placeholder="Name" >
+        </div>
+        <div class="form-group">
+          <input type="email" name="email" class="input-field form-input" placeholder="Email" >
+        </div>
+        <div class="form-group">
+          <textarea name="message" rows="5" class="input-field form-input" placeholder="Message"></textarea>
+        </div>
+        <div class="form-group">
+          <input type="submit" class="input-field submit-btn" value="Submit" >
+        </div>
+      </form>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.6.1/gsap.min.js"></script>
+<script src="{% static 'contactus/script.js'%}"></script>
+</body>
+</html>
