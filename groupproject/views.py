@@ -1,6 +1,6 @@
 from django.shortcuts import render
 from ast import Pass
-from asyncio.windows_events import NULL
+NULL = None
 from cProfile import Profile
 from email import message
 from genericpath import exists
@@ -40,19 +40,36 @@ def userlogout(request):
     # message.success(request,'Successfully Loggedout')
     return render(request,'index.html')
 def signup(request):
-    if(request.method=="POST"):
-        first_name=request.POST['firstname']
-        last_name=request.POST['lastname']
-        username=request.POST['username']
-        email=request.POST['email']
-        password=request.POST['password']
-        # phonenumber=request.POST['phonenumber']
-        print(first_name,last_name,username,email,password)
-        myuser=User.objects.create_user(first_name=first_name,email=email,last_name=last_name,username=username,password=password)
+    if request.method == "POST":
+        first_name = request.POST['firstname']
+        last_name = request.POST['lastname']
+        username = request.POST['username']
+        email = request.POST['email']
+        password = request.POST['password']
+
+        # ✅ Check if the username already exists
+        if User.objects.filter(username=username).exists():
+            messages.error(request, 'Username already exists. Please choose another one.')
+            return render(request, 'signup.html')
+
+        # ✅ Check if the email already exists
+        if User.objects.filter(email=email).exists():
+            messages.error(request, 'Email is already registered. Try logging in.')
+            return render(request, 'signup.html')
+
+        # ✅ Create and save the new user
+        myuser = User.objects.create_user(
+            username=username,
+            password=password,
+            email=email,
+            first_name=first_name,
+            last_name=last_name
+        )
         myuser.save()
-        messages.success(request,'Created Succesfully')
-        return render(request,'login.html')
-    return render(request,"signup.html")
+        messages.success(request, 'Account created successfully. Please log in.')
+        return redirect('login')  # or use render(request, 'login.html') if you don't use URL names
+
+    return render(request, "signup.html")
 def suppliersignup(request):
     if request.method == 'POST':
         first_name = request.POST['first_name']
