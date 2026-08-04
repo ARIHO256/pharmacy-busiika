@@ -1,0 +1,24 @@
+MyDoctor deep role-experience validation
+UTC 2026-08-04T08:23:30Z
+
+Backend syntax: 257 Python files passed
+Migration dependency graph: 47 local migrations passed
+Backend URL import wiring: 183 view symbols passed
+Frontend syntax: 161 JavaScript/JSX files passed
+Enterprise migration sync: 44 models passed
+Role catalogue: 37 roles, 37 home routes, 37 routed roles
+Workflow catalogue: 81 backend schemas, 81 referenced by role pages
+Demo coverage: 37 explicitly seeded role codes
+Role, portal, workflow and demo-account audit passed.
+Deep page catalogue: 382 unique pages, 971 role-page links, 37 roles passed
+Frontend relative imports: passed
+JSON manifests: passed
+Docker Compose and Prometheus YAML: passed
+Static validation completed successfully.
+
+Runtime dependency checks attempted:
+- Backend dependency installation: unavailable because the configured package mirror did not provide Django.
+- Frontend npm ci: unavailable because the configured package mirror did not provide the yaml transitive package.
+- Docker startup: not executed because Docker is unavailable in this environment.
+
+Run bash scripts/release-gate.sh in a connected deployment environment before production.

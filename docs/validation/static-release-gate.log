@@ -1,0 +1,38 @@
+[1/8] Static source, migration, role and route validation
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'artifact_tool.patches.record_artifact_tool_operations'
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'artifact_tool.patches.record_artifact_tool_operations'
+Backend syntax: 277 Python files passed
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'artifact_tool.patches.record_artifact_tool_operations'
+Migration dependency graph: 51 local migrations passed
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'artifact_tool.patches.record_artifact_tool_operations'
+Backend URL import wiring: 202 view symbols passed
+Frontend syntax: 164 JavaScript/JSX files passed
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'artifact_tool.patches.record_artifact_tool_operations'
+Enterprise migration sync: 44 models passed
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'artifact_tool.patches.record_artifact_tool_operations'
+Role catalogue: 37 roles, 41 home routes, 37 routed roles
+Workflow catalogue: 81 backend schemas, 81 referenced by role pages
+Demo coverage: 37 explicitly seeded role codes
+Role, portal, workflow and demo-account audit passed.
+Deep page catalogue: 382 unique pages, 971 role-page links, 37 roles passed
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'artifact_tool.patches.record_artifact_tool_operations'
+Frontend relative imports: passed
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'artifact_tool.patches.record_artifact_tool_operations'
+JSON manifests: passed
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'artifact_tool.patches.record_artifact_tool_operations'
+Docker Compose and Prometheus YAML: passed
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'artifact_tool.patches.record_artifact_tool_operations'
+Authorization audit: active-role and controlled-clinical-access checks passed
+Frontend acceptance audit: 164 source files passed
+Static validation completed successfully.
+Static-only release gate completed. Runtime checks were intentionally skipped.

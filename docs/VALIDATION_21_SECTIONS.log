@@ -1,0 +1,40 @@
+MyDoctor HealthOS — 21-section release validation
+Generated: 2026-08-04
+
+STATIC VALIDATION: PASSED
+
+Backend syntax: 257 Python files passed
+Migration dependency graph: 47 local migrations passed
+Backend URL import wiring: 181 view symbols passed
+Frontend syntax: 146 JavaScript/JSX files passed
+Enterprise migration sync: 44 models passed
+Role catalogue: 37 roles, 37 home routes, 37 routed roles
+Workflow catalogue: 81 backend schemas, 81 referenced by role pages
+Demo coverage: 37 explicitly seeded role codes
+Role, portal, workflow and demo-account audit passed.
+Frontend relative imports: passed
+JSON manifests: passed
+Docker Compose and Prometheus YAML: passed
+Static validation completed successfully.
+
+STATIC RELEASE GATE: PASSED
+
+scripts/release-gate.sh --static-only completed successfully.
+
+FULL RUNTIME RELEASE GATE: NOT EXECUTED TO COMPLETION IN DELIVERY SANDBOX
+
+The delivery sandbox does not have the Python/Django and npm dependencies
+installed, cannot download them from its package mirrors, and does not expose
+Docker. The full gate stopped before database migration with exit code 3 and
+this expected message:
+
+  Backend dependencies are unavailable.
+  Install backend/requirements.txt, then rerun scripts/release-gate.sh.
+
+Required connected-environment command:
+
+  bash scripts/release-gate.sh
+
+That command runs Django checks, migration drift detection, a clean migration,
+the full seed, verify_demo_data, backend tests, npm ci, the Vite production
+build and Docker Compose validation when Docker is installed.

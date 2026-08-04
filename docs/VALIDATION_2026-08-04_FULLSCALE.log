@@ -1,0 +1,28 @@
+MyDoctor full-scale release validation
+Date: 2026-08-04
+
+PASS  Backend Python compile/AST: 224 repository files
+PASS  Local migration dependency graph: 45 migrations
+PASS  Backend URL import wiring: 155 imported view symbols
+PASS  Frontend JavaScript/JSX parser: 135 files
+PASS  Frontend relative import resolution
+PASS  JSON manifest validation
+PASS  Shell syntax validation
+PASS  No NotImplementedError markers in backend/frontend release source
+PASS  Required environment examples, lock file and requirements manifest present
+
+Repository inventory
+- 120 Django model classes
+- 230 URL route declarations
+- 120 frontend portal/page JSX files
+- 85 backend test methods included
+
+Runtime gates not executed in this packaging environment
+- Django check --deploy
+- makemigrations --check --dry-run
+- clean PostgreSQL migrate
+- Django automated test suite
+- npm ci and Vite production build
+- Docker Compose boot/health test
+
+Reason: the environment package mirrors did not provide the required Python/npm dependencies and Docker was unavailable. Use the included GitHub Actions workflow or the commands in docs/PRODUCTION_READINESS.md in a connected environment.

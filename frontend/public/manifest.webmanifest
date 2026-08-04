@@ -1,0 +1,10 @@
+{
+  "name": "MyDoctor HealthOS",
+  "short_name": "MyDoctor",
+  "description": "Secure connected healthcare for patients and care teams.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#061a19",
+  "icons": []
+}

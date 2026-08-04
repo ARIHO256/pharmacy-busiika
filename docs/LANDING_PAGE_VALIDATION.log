@@ -1,0 +1,19 @@
+MyDoctor landing page validation
+Date: 2026-08-03
+
+PASSED
+- Python syntax compilation for backend/manage.py and backend/config/settings.py
+- frontend/package.json and frontend/package-lock.json JSON parsing
+- doctor-hero.svg XML parsing
+- LandingPage.css brace-balance validation
+- Relative JavaScript/JSX import resolution across frontend/src
+- Lightweight JSX tag-nesting validation for LandingPage.jsx
+- React port 3000 and Django proxy port 4000 configuration assertions
+- start-dev.sh Bash syntax validation
+- Search for obsolete development endpoints localhost:5173 and localhost:8000
+
+ENVIRONMENT LIMITATION
+- npm ci could not complete because the execution environment's internal npm registry returned 404 for @babel/parser@^7.20.7.
+- Python dependencies could not be installed because the execution environment's internal PyPI mirror did not expose the required Django version.
+- Therefore a fresh Vite production build and Django test run were not repeated in this environment after the landing-page change.
+- The previous enhanced project test report remains in docs/VALIDATION_2026-08-03.log; run the commands in docs/TESTING.md on a normal development machine before deployment.

@@ -1,0 +1,28 @@
+import { useState } from 'react'
+import { workforceApi } from '../../api/endpoints'
+import { Alert, Button, Card, Input, Modal, Select, Spinner, Table } from '../../components/ui'
+import { displayDate, getError, statusBadge, useRemote } from '../staff/shared'
+
+const roles = [
+  ['doctor', 'Doctor'], ['clinical_officer', 'Clinical officer'], ['dentist', 'Dentist'],
+  ['medical_director', 'Medical director'], ['nurse', 'Nurse'], ['midwife', 'Midwife'],
+  ['theatre_nurse', 'Theatre nurse'], ['anaesthetist', 'Anaesthetist'],
+  ['radiologist', 'Radiologist'], ['radiographer', 'Radiographer / sonographer'],
+  ['physiotherapist', 'Physiotherapist'], ['nutritionist', 'Nutritionist / dietitian'],
+  ['psychologist', 'Psychologist / counsellor'], ['paramedic', 'Paramedic'],
+  ['ambulance_dispatcher', 'Ambulance dispatcher'], ['receptionist', 'Receptionist'],
+  ['records_officer', 'Medical records officer'], ['cashier', 'Cashier / billing officer'],
+  ['accountant', 'Accountant'], ['finance_manager', 'Finance manager'],
+  ['pharmacist', 'Pharmacist'], ['lab_technician', 'Laboratory professional / phlebotomist'],
+  ['insurance_officer', 'Insurance officer'], ['claims_reviewer', 'Claims reviewer'],
+  ['storekeeper', 'Storekeeper'], ['procurement_officer', 'Procurement officer'],
+  ['facility_manager', 'Facility manager'], ['quality_officer', 'Quality assurance officer'],
+  ['compliance_officer', 'Data protection / compliance officer'], ['hr_officer', 'Human resources officer'],
+  ['it_support', 'IT support officer'],
+]
+export default function Staff(){
+ const staff=useRemote(()=>workforceApi.staff(),[]); const deps=useRemote(()=>workforceApi.departments(),[]); const [open,setOpen]=useState(false); const [error,setError]=useState(''); const [form,setForm]=useState({email:'',phone:'',first_name:'',last_name:'',role:'nurse',job_title:'',employee_number:'',department:''})
+ const invite=async(e)=>{e.preventDefault();setError('');try{await workforceApi.inviteStaff({...form,department:form.department||null});setOpen(false);staff.reload()}catch(err){setError(getError(err))}}
+ const change=async(row,status)=>{try{await workforceApi.setStaffStatus(row.id,status);staff.reload()}catch(err){setError(getError(err))}}
+ if(staff.loading||deps.loading)return <Spinner/>; const data=staff.data||{staff:[],invitations:[]}; return <div className="space-y-5">{error&&<Alert tone="danger">{error}</Alert>}<Card title="Facility team" subtitle="Roles are assigned within this organization and never grant wider platform access" actions={<Button onClick={()=>setOpen(true)}>Invite staff member</Button>}><Table rows={data.staff} empty="No staff members yet" columns={[{key:'user_name',label:'Staff member'},{key:'role',label:'Role',render:r=>r.role.replaceAll('_',' ')},{key:'department_name',label:'Department'},{key:'verification_status',label:'Credential',render:r=>statusBadge(r.verification_status)},{key:'status',label:'Membership',render:r=>statusBadge(r.status)},{key:'action',label:'',render:r=><Button variant="outline" onClick={()=>change(r,r.status==='active'?'suspended':'active')}>{r.status==='active'?'Suspend':'Reactivate'}</Button>}]}/></Card><Card title="Pending invitations" subtitle="Share the secure invitation URL with the intended staff member"><Table rows={data.invitations} empty="No pending invitations" columns={[{key:'email',label:'Email'},{key:'role',label:'Role',render:r=>r.role.replaceAll('_',' ')},{key:'department_name',label:'Department'},{key:'expires_at',label:'Expires',render:r=>displayDate(r.expires_at)},{key:'invitation_url',label:'Invitation link',render:r=><button className="text-primary-700" onClick={()=>navigator.clipboard?.writeText(r.invitation_url)}>Copy link</button>}]}/></Card><Modal open={open} onClose={()=>setOpen(false)} title="Invite facility staff"><form onSubmit={invite} className="space-y-4"><div className="grid grid-cols-2 gap-3"><Input label="First name" value={form.first_name} onChange={e=>setForm({...form,first_name:e.target.value})}/><Input label="Last name" value={form.last_name} onChange={e=>setForm({...form,last_name:e.target.value})}/></div><Input required type="email" label="Work email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/><Input label="Phone" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/><Select label="Role" value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>{roles.map(([value,label])=><option key={value} value={value}>{label}</option>)}</Select><Select label="Department" value={form.department} onChange={e=>setForm({...form,department:e.target.value})}><option value="">No department</option>{(deps.data||[]).map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</Select><div className="grid grid-cols-2 gap-3"><Input label="Job title" value={form.job_title} onChange={e=>setForm({...form,job_title:e.target.value})}/><Input label="Employee number" value={form.employee_number} onChange={e=>setForm({...form,employee_number:e.target.value})}/></div><Alert tone="info">Doctors, nurses, pharmacists and laboratory professionals must upload their licence when accepting the invitation and remain restricted until verified.</Alert><div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={()=>setOpen(false)}>Cancel</Button><Button>Send invitation</Button></div></form></Modal></div>
+}

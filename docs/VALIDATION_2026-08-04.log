@@ -1,0 +1,41 @@
+MyDoctor role, workforce, billing and verification enhancement validation
+Local release date: 2026-08-04 (Africa/Kampala)
+UTC validation time: 2026-08-03T22:51:44Z
+Python: 3.13.5
+Node: v22.16.0
+npm: 10.9.2
+
+PASSED IN THIS ENVIRONMENT
+- Python source compilation: python3 -m compileall -q backend
+- Frontend JavaScript/JSX syntax parse using the installed TypeScript parser: 98 source files
+- Frontend relative-import resolution: 98 source files
+- frontend/package.json and frontend/package-lock.json JSON parsing
+- start-dev.sh Bash syntax validation
+- Merge-conflict marker scan excluding generated environments and bytecode
+
+TEST COVERAGE ADDED IN THIS ENHANCEMENT
+- Role and profile registration, including clinic organization registration
+- Administrator verification and organization-registry synchronization
+- Laboratory result access isolation for assigned and unrelated nurses
+- Cashier invoice, partial-payment, receipt and shift reconciliation workflow
+- Facility-manager billing oversight without cashier collection authority
+
+PREVIOUS BASELINE EVIDENCE RETAINED IN THE REPOSITORY
+- docs/VALIDATION_2026-08-03.log records 65 Django tests passing before this workforce/billing enhancement phase.
+
+CURRENT ENVIRONMENT LIMITATIONS
+- Django and Django REST Framework are not installed in this execution environment, so manage.py check, migration-drift validation and the expanded Django test suite could not be rerun after the latest changes.
+- npm ci could not complete because the execution environment's package mirror returned 404 for yaml-2.9.0.tgz. Therefore a fresh Vite production bundle could not be generated here.
+
+REQUIRED RELEASE-GATE COMMANDS ON A NORMAL DEVELOPMENT MACHINE
+  cd backend
+  python3 -m venv .venv
+  source .venv/bin/activate
+  pip install -r requirements.txt
+  python manage.py check
+  python manage.py makemigrations --check --dry-run
+  python manage.py test
+
+  cd ../frontend
+  npm ci
+  npm run build

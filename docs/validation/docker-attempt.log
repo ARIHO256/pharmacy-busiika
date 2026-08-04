@@ -1,0 +1,5 @@
+bash: line 3: docker: command not found
+bash: line 4: docker: command not found
+bash: line 5: docker: command not found
+
+EXIT_STATUS=127

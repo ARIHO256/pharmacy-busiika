@@ -1,0 +1,148 @@
+import { portalForRole } from '../portals/enterprise/roleCatalog'
+export const ROLE_EXPERIENCE = {
+  patient: {
+    label: 'Patient',
+    title: 'Patient Care Portal',
+    eyebrow: 'Personal health super app',
+    description: 'Appointments, consultations, prescriptions, payments and your longitudinal health record.',
+    quickAction: { label: 'Find a doctor', to: '/patient/doctors', icon: 'search' },
+    avatarTone: 'blue',
+  },
+  doctor: {
+    label: 'Doctor',
+    title: 'Clinical Workspace',
+    eyebrow: 'Provider operating system',
+    description: 'Manage availability, appointments, consultations, clinical records and earnings.',
+    quickAction: { label: 'Open clinical workspace', to: '/doctor/clinical', icon: 'clipboard' },
+    avatarTone: 'violet',
+  },
+  nurse: {
+    label: 'Nurse / Midwife',
+    title: 'Nursing Workspace',
+    eyebrow: 'Triage, care and medication safety',
+    description: 'Manage patient queues, observations, nursing notes, medication rounds and handovers.',
+    quickAction: { label: 'Open triage queue', to: '/nurse/triage', icon: 'activity' },
+    avatarTone: 'teal',
+  },
+  receptionist: {
+    label: 'Receptionist',
+    title: 'Front Desk Workspace',
+    eyebrow: 'Patient access and flow',
+    description: 'Register patients, check in appointments, manage queues and coordinate provider schedules.',
+    quickAction: { label: 'Check in a patient', to: '/reception/check-in', icon: 'calendar' },
+    avatarTone: 'blue',
+  },
+  records_officer: {
+    label: 'Records Officer',
+    title: 'Medical Records Workspace',
+    eyebrow: 'Identity and record integrity',
+    description: 'Find patients, resolve demographics and support authorised record handling.',
+    quickAction: { label: 'Find patient', to: '/reception/patients', icon: 'search' },
+    avatarTone: 'blue',
+  },
+  cashier: {
+    label: 'Cashier / Billing',
+    title: 'Billing & Collections',
+    eyebrow: 'Invoices, payments and receipts',
+    description: 'Create itemised invoices, collect payments, print receipts and reconcile cashier shifts.',
+    quickAction: { label: 'Create invoice', to: '/cashier/invoices', icon: 'money' },
+    avatarTone: 'orange',
+  },
+  pharmacist: {
+    label: 'Pharmacist',
+    title: 'Pharmacist Workspace',
+    eyebrow: 'Prescription and medicine safety',
+    description: 'Validate prescriptions, dispense medicines and manage stock, suppliers and orders.',
+    quickAction: { label: 'Review prescriptions', to: '/pharmacist/rx-orders', icon: 'prescription' },
+    avatarTone: 'green',
+  },
+  storekeeper: {
+    label: 'Storekeeper',
+    title: 'Inventory Workspace',
+    eyebrow: 'Stock and procurement control',
+    description: 'Manage products, suppliers, stock movement and replenishment.',
+    quickAction: { label: 'Review inventory', to: '/pharmacist/inventory', icon: 'pill' },
+    avatarTone: 'green',
+  },
+  lab_technician: {
+    label: 'Laboratory Professional',
+    title: 'Laboratory Staff Workspace',
+    eyebrow: 'Specimens, testing and validation',
+    description: 'Track referred tests, specimens, results, critical values and report release.',
+    quickAction: { label: 'Open test worklist', to: '/lab-staff/orders', icon: 'flask' },
+    avatarTone: 'violet',
+  },
+  facility_manager: {
+    label: 'Facility Manager',
+    title: 'Facility Operations',
+    eyebrow: 'People, departments and service delivery',
+    description: 'Manage staff, departments, queues, capacity, billing oversight and facility operations.',
+    quickAction: { label: 'Manage staff', to: '/facility/staff', icon: 'users' },
+    avatarTone: 'navy',
+  },
+  pharmacy: {
+    label: 'Pharmacy',
+    title: 'Pharmacy Operations',
+    eyebrow: 'Connected medicine services',
+    description: 'Receive prescriptions, manage stock, fulfil orders and coordinate delivery.',
+    quickAction: { label: 'Review prescriptions', to: '/pharmacy/rx-orders', icon: 'prescription' },
+    avatarTone: 'green',
+  },
+  lab: {
+    label: 'Laboratory',
+    title: 'Laboratory Operations',
+    eyebrow: 'Diagnostics network',
+    description: 'Manage test catalogues, orders, samples, processing and structured results.',
+    quickAction: { label: 'Open lab orders', to: '/lab/orders', icon: 'flask' },
+    avatarTone: 'violet',
+  },
+  hospital: {
+    label: 'Hospital',
+    title: 'Hospital & Clinic Portal',
+    eyebrow: 'Facility operating system',
+    description: 'Coordinate services, bookings, departments, capacity and patient care delivery.',
+    quickAction: { label: 'Review bookings', to: '/hospital/bookings', icon: 'calendar' },
+    avatarTone: 'teal',
+  },
+  insurance: {
+    label: 'Insurance',
+    title: 'Coverage & Claims Portal',
+    eyebrow: 'Health financing network',
+    description: 'Verify policies, review claims, authorise care and reconcile settlements.',
+    quickAction: { label: 'Review claims', to: '/insurance/claims', icon: 'shield' },
+    avatarTone: 'orange',
+  },
+  insurance_officer: {
+    label: 'Insurance Officer',
+    title: 'Coverage & Claims Workspace',
+    eyebrow: 'Eligibility, authorisation and claims',
+    description: 'Verify memberships, coordinate preauthorisation, review claims and reconcile payer decisions.',
+    quickAction: { label: 'Review claims', to: '/insurance/claims', icon: 'shield' },
+    avatarTone: 'orange',
+  },
+  admin: {
+    label: 'Administrator',
+    title: 'Platform Command Centre',
+    eyebrow: 'Governance and operations',
+    description: 'Manage users, providers, appointments, finance, quality, compliance and audit trails.',
+    quickAction: { label: 'Verify providers', to: '/admin/registry', icon: 'doctor' },
+    avatarTone: 'navy',
+  },
+}
+
+const ROLE_ALIASES = { clinical_officer:'doctor', dentist:'doctor', physiotherapist:'doctor', nutritionist:'doctor', psychologist:'doctor', medical_director:'doctor', midwife:'nurse', theatre_nurse:'nurse', accountant:'cashier', finance_manager:'facility_manager', procurement_officer:'facility_manager', quality_officer:'facility_manager', compliance_officer:'facility_manager', hr_officer:'facility_manager', it_support:'facility_manager', claims_reviewer:'insurance_officer', radiologist:'lab_technician', radiographer:'lab_technician', anaesthetist:'doctor', paramedic:'nurse', ambulance_dispatcher:'receptionist' }
+
+export function getRoleExperience(role) {
+  const portal = portalForRole(role)
+  if (portal) {
+    return {
+      label: portal.title.replace(' Workspace', '').replace(' Centre', ''),
+      title: portal.title,
+      eyebrow: portal.eyebrow,
+      description: portal.description,
+      quickAction: { label: portal.modules[0]?.label || 'Open workspace', to: `/${portal.path}/${portal.modules[0]?.id || ''}`, icon: portal.modules[0]?.icon || portal.icon },
+      avatarTone: ['finance_manager','accountant','claims_reviewer','insurance_officer'].includes(role) ? 'orange' : ['quality_officer','compliance_officer','medical_director','it_support'].includes(role) ? 'navy' : ['midwife','physiotherapist','paramedic'].includes(role) ? 'teal' : 'blue',
+    }
+  }
+  return ROLE_EXPERIENCE[role] || ROLE_EXPERIENCE[ROLE_ALIASES[role]] || ROLE_EXPERIENCE.patient
+}

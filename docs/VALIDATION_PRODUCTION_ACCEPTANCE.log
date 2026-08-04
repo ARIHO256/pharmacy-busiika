@@ -1,0 +1,45 @@
+MyDoctor Production Acceptance Workflow Release
+Validation date: 2026-08-04
+
+STATIC RELEASE GATE: PASSED
+- Backend syntax: 277 Python files
+- Migration dependency graph: 51 local migrations
+- Backend URL import wiring: 202 view symbols
+- Frontend syntax: 164 JavaScript/JSX files
+- Enterprise migration sync: 44 models
+- Role catalogue: 37 roles, 41 home routes, 37 routed roles
+- Workflow catalogue: 81 backend schemas referenced by role pages
+- Demo coverage: 37 explicitly seeded role codes
+- Deep page catalogue: 382 unique pages, 971 role-page links
+- Frontend relative imports: passed
+- JSON manifests: passed
+- Docker Compose and Prometheus YAML: passed
+- Authorization audit: passed
+- Frontend acceptance audit: passed
+
+RUNTIME ATTEMPTS IN THE DELIVERY ENVIRONMENT
+
+1. Django configuration check: NOT EXECUTED SUCCESSFULLY
+   Result: Django is not installed in the delivery interpreter.
+   Evidence: docs/validation/django-check-attempt.log
+
+2. Frontend dependency installation: NOT EXECUTED SUCCESSFULLY
+   Result: the configured internal npm mirror returned HTTP 404 for yaml-2.9.0.tgz.
+   Evidence: docs/validation/npm-ci-attempt.log
+
+3. Docker Compose runtime/config validation: NOT EXECUTED
+   Result: Docker is not installed in the delivery environment.
+   Evidence: docs/validation/docker-attempt.log
+
+WHAT WAS NOT CLAIMED
+- No claim that Django migrations ran here.
+- No claim that the Django tests ran here.
+- No claim that the 37-role live smoke test ran here.
+- No claim that npm/Vite production build passed here.
+- No claim that Docker services started here.
+- No claim of clinical, privacy, security or regulatory certification.
+
+REQUIRED DEPLOYMENT COMMAND
+  bash scripts/release-gate.sh
+
+A passing deployment release gate must include clean migration, seed verification, backend tests, 37-role smoke, readiness load smoke, frontend production build and Docker manifest validation.
