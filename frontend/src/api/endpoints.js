@@ -249,6 +249,7 @@ export const workforceApi = {
   patients: (search = '') => client.get('/workforce/patients/', { params: { search } }),
   registerPatient: (payload) => client.post('/workforce/patients/', payload),
   visits: (params) => client.get('/workforce/visits/', { params }),
+  teamSchedule: (params) => client.get('/workforce/team-schedule/', { params }),
   checkIn: (payload) => client.post('/workforce/visits/', payload),
   updateVisit: (id, payload) => client.post(`/workforce/visits/${id}/action/`, payload),
   triage: (params) => client.get('/workforce/triage/', { params }),

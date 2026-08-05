@@ -157,25 +157,25 @@ def validate_record(domain, record_type, payload):
         raise ValidationError({"payload": "Payload must be an object."})
     missing = [name for name, spec in schema["fields"].items() if spec.get("required") and payload.get(name) in (None, "", [])]
     if missing:
-        raise ValidationError({"payload": {name: "This field is required." for name in missing}})
+        raise ValidationError({"payload": [f"{name}: This field is required." for name in missing]})
     unknown = set(payload) - set(schema["fields"])
     if unknown:
-        raise ValidationError({"payload": {name: "Unknown field for this record type." for name in sorted(unknown)}})
+        raise ValidationError({"payload": [f"{name}: Unknown field for this record type." for name in sorted(unknown)]})
     for name, value in payload.items():
         kind = schema["fields"][name].get("kind")
         if value in (None, ""):
             continue
         if kind == "number" and not isinstance(value, (int, float)):
-            raise ValidationError({"payload": {name: "Must be numeric."}})
+            raise ValidationError({"payload": [f"{name}: Must be numeric."]})
         if kind == "boolean" and not isinstance(value, bool):
-            raise ValidationError({"payload": {name: "Must be true or false."}})
+            raise ValidationError({"payload": [f"{name}: Must be true or false."]})
         if kind == "list" and not isinstance(value, list):
-            raise ValidationError({"payload": {name: "Must be a list."}})
+            raise ValidationError({"payload": [f"{name}: Must be a list."]})
         if kind == "json" and not isinstance(value, (dict, list)):
-            raise ValidationError({"payload": {name: "Must be an object or list."}})
+            raise ValidationError({"payload": [f"{name}: Must be an object or list."]})
         options = schema["fields"][name].get("options")
         if options and value not in options:
-            raise ValidationError({"payload": {name: f"Must be one of: {', '.join(options)}."}})
+            raise ValidationError({"payload": [f"{name}: Must be one of: {', '.join(options)}."]})
 
 
 def transition_for(record_type, current_status, action):

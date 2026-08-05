@@ -1,6 +1,6 @@
 apiVersion: 1
 datasources:
-  - name: MyDoctor Prometheus
+  - name: HealthPilot Prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090

@@ -1,8 +1,8 @@
-# MyDoctor Enterprise Full-Scale Release Manifest
+# HealthPilot Enterprise Full-Scale Release Manifest
 
 ## Release purpose
 
-This release extends the supplied MyDoctor Django/React application in place. It preserves the original platform and adds production-oriented role separation, hospital operations, diagnostics, billing, notifications, insurance, fake data and deployment tooling.
+This release extends the supplied HealthPilot Django/React application in place. It preserves the original platform and adds production-oriented role separation, hospital operations, diagnostics, billing, notifications, insurance, fake data and deployment tooling.
 
 ## Repository inventory
 

@@ -4,7 +4,7 @@ from config.uploads import validate_clinical_document_upload
 
 from .models import (
     AccountSubscription, Admission, AdmissionTransfer, Announcement, BedAllocation,
-    ClinicalRound, DischargeSummary, FacilityBed, ImagingOrder, ImagingReport,
+    ClinicalRound, Complaint, DischargeSummary, FacilityBed, ImagingOrder, ImagingReport,
     InventoryBatch, InventoryItem, PurchaseOrder, PurchaseOrderItem, StockMovement,
     SubscriptionPlan, SupportTicket, Ward, WardTask,
 )
@@ -243,6 +243,23 @@ class SupportTicketSerializer(serializers.ModelSerializer):
 
     def get_assigned_to_name(self, obj):
         return user_name(obj.assigned_to)
+
+
+class ComplaintSerializer(serializers.ModelSerializer):
+    complainant_name = serializers.CharField(source="complainant.display_name", read_only=True)
+    against_user_name = serializers.SerializerMethodField()
+    handled_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Complaint
+        fields = "__all__"
+        read_only_fields = ["complainant", "status", "resolution_notes", "handled_by", "created_at", "updated_at"]
+
+    def get_against_user_name(self, obj):
+        return user_name(obj.against_user)
+
+    def get_handled_by_name(self, obj):
+        return user_name(obj.handled_by)
 
 
 class AnnouncementSerializer(serializers.ModelSerializer):

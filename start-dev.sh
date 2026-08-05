@@ -35,7 +35,7 @@ BACKEND_PID=$!
 ) &
 FRONTEND_PID=$!
 
-printf '\nMyDoctor development servers:\n'
+printf '\nHealthPilot development servers:\n'
 printf '  React: http://localhost:3000\n'
 printf '  Django: http://localhost:4000\n\n'
 

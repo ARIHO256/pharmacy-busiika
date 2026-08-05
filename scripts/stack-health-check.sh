@@ -7,11 +7,11 @@ cd "$ROOT"
 command -v docker >/dev/null 2>&1 || { echo "Docker is required." >&2; exit 3; }
 
 echo "Checking container health states"
-docker compose ps --format json > /tmp/mydoctor-compose-ps.json
+docker compose ps --format json > /tmp/healthpilot-compose-ps.json
 python3 - <<'PY'
 import json
 from pathlib import Path
-raw=Path('/tmp/mydoctor-compose-ps.json').read_text().strip()
+raw=Path('/tmp/healthpilot-compose-ps.json').read_text().strip()
 rows=[]
 if raw:
     try: rows=json.loads(raw)
@@ -36,9 +36,9 @@ curl -fsS http://127.0.0.1:9090/-/ready >/dev/null
 curl -fsS http://127.0.0.1:3001/api/health >/dev/null
 FLOWER_AUTH="${FLOWER_BASIC_AUTH:-admin:change-me}"
 curl -fsS -u "$FLOWER_AUTH" http://127.0.0.1:5555/ >/dev/null
-curl -fsS -u "${ORTHANC_USERNAME:-mydoctor}:${ORTHANC_PASSWORD:-change-this-orthanc-password}" http://127.0.0.1:8042/system >/dev/null
+curl -fsS -u "${ORTHANC_USERNAME:-healthpilot}:${ORTHANC_PASSWORD:-change-this-orthanc-password}" http://127.0.0.1:8042/system >/dev/null
 
-docker compose exec -T postgres pg_isready -U "${POSTGRES_USER:-mydoctor}" -d "${POSTGRES_DB:-mydoctor}" >/dev/null
+docker compose exec -T postgres pg_isready -U "${POSTGRES_USER:-healthpilot}" -d "${POSTGRES_DB:-healthpilot}" >/dev/null
 docker compose exec -T redis redis-cli -a "${REDIS_PASSWORD:-change-this-redis-password}" ping | grep -q PONG
 docker compose exec -T rabbitmq rabbitmq-diagnostics -q ping >/dev/null
 docker compose exec -T redpanda rpk cluster health --brokers=redpanda:9092 | grep -q 'Healthy:.*true'

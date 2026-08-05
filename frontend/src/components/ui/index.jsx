@@ -100,7 +100,7 @@ export function Badge({ color = 'slate', children }) {
   )
 }
 
-export function Table({ columns, rows, empty = 'No data yet' }) {
+export function Table({ columns, rows, empty = 'No data yet', onRowClick }) {
   if (!rows?.length) return <div className="py-10 text-center text-sm text-slate-400">{empty}</div>
   return (
     <div className="overflow-x-auto">
@@ -112,7 +112,11 @@ export function Table({ columns, rows, empty = 'No data yet' }) {
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={row.id ?? index} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/80">
+            <tr
+              key={row.id ?? index}
+              className={`border-b border-slate-100 last:border-b-0 hover:bg-slate-50/80 ${onRowClick ? 'cursor-pointer' : ''}`}
+              onClick={onRowClick ? () => onRowClick(row) : undefined}
+            >
               {columns.map((column) => <td key={column.key} className="py-3 pr-4 text-slate-700">{column.render ? column.render(row) : row[column.key]}</td>)}
             </tr>
           ))}

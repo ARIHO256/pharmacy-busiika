@@ -29,7 +29,7 @@ class Command(BaseCommand):
             scope={"storage_name": options["storage_name"]},
         )
         try:
-            with tempfile.TemporaryDirectory(prefix="mydoctor-restore-test-") as temp_dir:
+            with tempfile.TemporaryDirectory(prefix="healthpilot-restore-test-") as temp_dir:
                 compressed = Path(temp_dir) / "backup.dump.gz"
                 with default_storage.open(options["storage_name"], "rb") as source, compressed.open("wb") as target:
                     shutil.copyfileobj(source, target)

@@ -10,7 +10,7 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import timedelta
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -22,9 +22,9 @@ from django.utils import timezone
 from enterprise.access import active_role
 
 from .models import (
-    ContentEntry, DeadLetterEvent, EnterpriseRecord, EventDelivery, FHIRResource,
-    ImagingStudy, MedicationInteraction, MedicationKnowledge, NotificationProvider,
-    ReportRun, ResourceAttachment, SecurityOperation, TelemedicineParticipant,
+    ContentEntry, DeadLetterEvent, DuplicatePatientCandidate, EnterpriseRecord, EventDelivery,
+    FHIRResource, ImagingStudy, MasterPatientIndex, MedicationInteraction, MedicationKnowledge,
+    NotificationProvider, ReportRun, ResourceAttachment, SecurityOperation, TelemedicineParticipant,
     TelemedicineSession, VerificationAutomation,
 )
 
@@ -53,8 +53,13 @@ def http_json(url, *, method="GET", data=None, headers=None, timeout=30):
 class JitsiProvider:
     def create(self, session):
         base = os.getenv("JITSI_BASE_URL", "https://meet.jit.si").rstrip("/")
-        room = f"mydoctor-{session.public_id.hex}"
-        return {"external_id": room, "join_url": f"{base}/{room}", "host_url": f"{base}/{room}#config.prejoinPageEnabled=false"}
+        room = f"healthpilot-{session.public_id.hex}"
+        join_url = f"{base}/{room}"
+        host_url = f"{base}/{room}#config.prejoinPageEnabled=false"
+        if session.mode == TelemedicineSession.Mode.AUDIO:
+            join_url += "#config.startWithVideoMuted=true&config.startAudioOnly=true"
+            host_url += "&config.startWithVideoMuted=true&config.startAudioOnly=true"
+        return {"external_id": room, "join_url": join_url, "host_url": host_url}
 
 
 class ZoomProvider:
@@ -77,7 +82,7 @@ class ZoomProvider:
         token = self._token()
         user_id = os.getenv("ZOOM_HOST_USER_ID", "me")
         payload = {
-            "topic": f"MyDoctor consultation {session.public_id}",
+            "topic": f"HealthPilot consultation {session.public_id}",
             "type": 2,
             "start_time": session.scheduled_start.isoformat() if session.scheduled_start else None,
             "duration": int(os.getenv("TELEMEDICINE_DEFAULT_DURATION_MINUTES", "30")),
@@ -86,6 +91,8 @@ class ZoomProvider:
                 "waiting_room": session.waiting_room_enabled,
                 "join_before_host": False,
                 "mute_upon_entry": True,
+                "participant_video": session.mode != TelemedicineSession.Mode.AUDIO,
+                "host_video": session.mode != TelemedicineSession.Mode.AUDIO,
                 "auto_recording": "cloud" if session.recording_enabled else "none",
                 "approval_type": 0,
             },
@@ -99,19 +106,25 @@ class ZoomProvider:
         return {"external_id": str(data.get("id", "")), "join_url": data.get("join_url", ""), "host_url": data.get("start_url", "")}
 
 
-def create_telemedicine_session(appointment, provider=None):
+def create_telemedicine_session(appointment, provider=None, mode=TelemedicineSession.Mode.VIDEO):
     provider_name = provider or os.getenv("TELEMEDICINE_PROVIDER", "jitsi").lower()
+    if mode not in TelemedicineSession.Mode.values:
+        mode = TelemedicineSession.Mode.VIDEO
+    scheduled_start = None
+    if getattr(appointment, "date", None) and getattr(appointment, "start_time", None):
+        scheduled_start = timezone.make_aware(datetime.combine(appointment.date, appointment.start_time))
     session, _ = TelemedicineSession.objects.get_or_create(
         appointment=appointment,
-        defaults={"provider": provider_name, "scheduled_start": appointment.start_time},
+        defaults={"provider": provider_name, "scheduled_start": scheduled_start, "mode": mode},
     )
+    session.mode = mode
     adapter = ZoomProvider() if provider_name == "zoom" else JitsiProvider()
     result = adapter.create(session)
     session.provider = provider_name
     session.external_id = result["external_id"]
     session.join_url = result["join_url"]
     session.host_url = result["host_url"]
-    session.save(update_fields=["provider", "external_id", "join_url", "host_url"])
+    session.save(update_fields=["provider", "mode", "external_id", "join_url", "host_url"])
     for user, role in ((appointment.patient, "patient"), (appointment.doctor, "clinician")):
         TelemedicineParticipant.objects.get_or_create(session=session, user=user, defaults={"role": role})
     return session
@@ -356,7 +369,7 @@ def deliver_event_delivery(delivery):
     headers = {"Idempotency-Key": delivery.idempotency_key}
     secret = os.getenv(endpoint.credentials_reference, "") if endpoint.credentials_reference else ""
     if secret:
-        headers["X-MyDoctor-Signature"] = sign_payload(secret, payload)
+        headers["X-HealthPilot-Signature"] = sign_payload(secret, payload)
     try:
         if delivery.schema_id:
             try:
@@ -737,7 +750,7 @@ def fhir_bundle_for_patient(patient, organization=None):
     return {
         "resourceType": "Bundle", "type": "collection", "timestamp": timezone.now().isoformat(),
         "total": len(entries), "entry": entries,
-        "meta": {"tag": [{"system": "urn:mydoctor:bundle", "code": "patient-export"}]},
+        "meta": {"tag": [{"system": "urn:healthpilot:bundle", "code": "patient-export"}]},
     }
 
 

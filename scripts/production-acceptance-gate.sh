@@ -6,7 +6,7 @@ RELEASE_VERSION="${RELEASE_VERSION:-$(date +%Y.%m.%d)}"
 SOAK_HOURS="${SOAK_HOURS:-4}"
 KEEP_STACK="${KEEP_STACK:-false}"
 SAFE_RELEASE="$(printf %s "$RELEASE_VERSION" | tr -cd "[:alnum:]_")"
-export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-mydoctor_acceptance_${SAFE_RELEASE}}"
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-healthpilot_acceptance_${SAFE_RELEASE}}"
 
 cd "$ROOT"
 command -v docker >/dev/null 2>&1 || { echo "Docker is required for the production acceptance gate." >&2; exit 3; }
@@ -30,10 +30,10 @@ docker compose build --pull
 echo "[3/12] Start PostgreSQL and infrastructure dependencies"
 docker compose up -d postgres redis minio minio-init clamav orthanc redpanda rabbitmq mailpit
 for attempt in {1..90}; do
-  if docker compose exec -T postgres pg_isready -U "${POSTGRES_USER:-mydoctor}" -d "${POSTGRES_DB:-mydoctor}" >/dev/null 2>&1; then break; fi
+  if docker compose exec -T postgres pg_isready -U "${POSTGRES_USER:-healthpilot}" -d "${POSTGRES_DB:-healthpilot}" >/dev/null 2>&1; then break; fi
   sleep 2
 done
-docker compose exec -T postgres pg_isready -U "${POSTGRES_USER:-mydoctor}" -d "${POSTGRES_DB:-mydoctor}"
+docker compose exec -T postgres pg_isready -U "${POSTGRES_USER:-healthpilot}" -d "${POSTGRES_DB:-healthpilot}"
 
 echo "[4/12] Clean PostgreSQL migration, drift check and demonstration seed"
 docker compose run --rm backend python manage.py check --deploy

@@ -48,7 +48,7 @@ class Command(BaseCommand):
             "https_redirect": bool(getattr(settings, "SECURE_SSL_REDIRECT", False)),
             "secure_session_cookie": bool(getattr(settings, "SESSION_COOKIE_SECURE", False)),
             "secure_csrf_cookie": bool(getattr(settings, "CSRF_COOKIE_SECURE", False)),
-            "external_provider_mode": str(os.getenv("MYDOCTOR_PROVIDER_MODE", "sandbox")).lower() in {"sandbox", "production"},
+            "external_provider_mode": str(os.getenv("HEALTHPILOT_PROVIDER_MODE", "sandbox")).lower() in {"sandbox", "production"},
         }
         if options["allow_non_postgres"]:
             configuration["postgresql"] = True

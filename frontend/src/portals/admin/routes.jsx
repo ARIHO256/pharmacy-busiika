@@ -1,6 +1,7 @@
 import { deepNav, deepRoutes } from '../deep/routes'
 import Overview from './Overview'
 import Users from './Users'
+import AdminUserProfile from './AdminUserProfile'
 import Appointments from './Appointments'
 import Finance from './Finance'
 import Reviews from './Reviews'
@@ -36,9 +37,9 @@ const adminResourceModules = {
 }
 
 const adminNav = [
-  { to: '/admin/release-acceptance', label: 'Release Acceptance', icon: 'verified', group: 'Trust & governance', description: 'Formal workflow, privacy, safety, security and recovery sign-off', roles: ['admin','platform_super_admin','operations_admin','compliance_admin','clinical_safety_admin'] },
-  { to: '/admin/privileged-access', label: 'Controlled Clinical Access', icon: 'shield', group: 'Trust & governance', description: 'Patient-specific, MFA-backed, time-limited administrator elevation', roles: ['admin','platform_super_admin','compliance_admin','clinical_safety_admin','operations_admin'] },
-  { to: '/admin/identity-command', label: 'Identity Command Centre', icon: 'users', group: 'Identity & access', description: 'Global search, sessions, MFA, account state and scoped role contexts', roles: ['admin','platform_super_admin'] },
+  { to: '/admin/release-acceptance', label: 'Release Acceptance', icon: 'verified', group: 'Trust & governance', description: 'Formal workflow, privacy, safety, security and recovery sign-off', roles: ['admin', 'platform_super_admin', 'operations_admin', 'compliance_admin', 'clinical_safety_admin'] },
+  { to: '/admin/privileged-access', label: 'Controlled Clinical Access', icon: 'shield', group: 'Trust & governance', description: 'Patient-specific, MFA-backed, time-limited administrator elevation', roles: ['admin', 'platform_super_admin', 'compliance_admin', 'clinical_safety_admin', 'operations_admin'] },
+  { to: '/admin/identity-command', label: 'Identity Command Centre', icon: 'users', group: 'Identity & access', description: 'Global search, sessions, MFA, account state and scoped role contexts', roles: ['admin', 'platform_super_admin'] },
   { to: '/admin/enterprise-workflows', label: 'Enterprise Workflows', icon: 'activity', group: 'Care operations', description: 'All structured clinical and operational workflows' },
   { to: '/admin/enterprise-tools', label: 'Clinical & Data Tools', icon: 'settings', group: 'Platform services', description: 'Medication safety, MPI and FHIR tools' },
   { to: '/admin/cms', label: 'Content CMS', icon: 'file', group: 'Platform services', description: 'Banners, promotions, legal pages and templates' },
@@ -70,27 +71,27 @@ const adminNav = [
 
 ]
 
-const SUPER_ADMIN_ROLES = ['admin','platform_super_admin']
+const SUPER_ADMIN_ROLES = ['admin', 'platform_super_admin']
 const ADMIN_NAV_ACCESS = {
-  '/admin/release-acceptance': ['admin','platform_super_admin','operations_admin','compliance_admin','clinical_safety_admin'],
-  '/admin/privileged-access': ['admin','platform_super_admin','compliance_admin','clinical_safety_admin','operations_admin'],
-  '/admin': ['admin','platform_super_admin','operations_admin','compliance_admin','clinical_safety_admin'],
-  '/admin/operations': ['admin','platform_super_admin','operations_admin'],
-  '/admin/analytics': ['admin','platform_super_admin','operations_admin','clinical_safety_admin'],
-  '/admin/emergency': ['admin','platform_super_admin','operations_admin','clinical_safety_admin'],
-  '/admin/theatre': ['admin','platform_super_admin','operations_admin','clinical_safety_admin'],
-  '/admin/appointments': ['admin','platform_super_admin','operations_admin'],
-  '/admin/subscriptions': ['admin','platform_super_admin','operations_admin'],
-  '/admin/support': ['admin','platform_super_admin','operations_admin'],
-  '/admin/quality-incidents': ['admin','platform_super_admin','clinical_safety_admin','compliance_admin'],
-  '/admin/compliance': ['admin','platform_super_admin','compliance_admin'],
-  '/admin/audit': ['admin','platform_super_admin','compliance_admin'],
-  '/admin/security-operations': ['admin','platform_super_admin','compliance_admin'],
-  '/admin/registry': ['admin','platform_super_admin','clinical_safety_admin'],
-  '/admin/ai-verification': ['admin','platform_super_admin','clinical_safety_admin'],
-  '/admin/enterprise-workflows': ['admin','platform_super_admin','operations_admin','clinical_safety_admin'],
-  '/admin/finance': ['admin','platform_super_admin','operations_admin'],
-  '/admin/finance-controls': ['admin','platform_super_admin','operations_admin'],
+  '/admin/release-acceptance': ['admin', 'platform_super_admin', 'operations_admin', 'compliance_admin', 'clinical_safety_admin'],
+  '/admin/privileged-access': ['admin', 'platform_super_admin', 'compliance_admin', 'clinical_safety_admin', 'operations_admin'],
+  '/admin': ['admin', 'platform_super_admin', 'operations_admin', 'compliance_admin', 'clinical_safety_admin'],
+  '/admin/operations': ['admin', 'platform_super_admin', 'operations_admin'],
+  '/admin/analytics': ['admin', 'platform_super_admin', 'operations_admin', 'clinical_safety_admin'],
+  '/admin/emergency': ['admin', 'platform_super_admin', 'operations_admin', 'clinical_safety_admin'],
+  '/admin/theatre': ['admin', 'platform_super_admin', 'operations_admin', 'clinical_safety_admin'],
+  '/admin/appointments': ['admin', 'platform_super_admin', 'operations_admin'],
+  '/admin/subscriptions': ['admin', 'platform_super_admin', 'operations_admin'],
+  '/admin/support': ['admin', 'platform_super_admin', 'operations_admin'],
+  '/admin/quality-incidents': ['admin', 'platform_super_admin', 'clinical_safety_admin', 'compliance_admin'],
+  '/admin/compliance': ['admin', 'platform_super_admin', 'compliance_admin'],
+  '/admin/audit': ['admin', 'platform_super_admin', 'compliance_admin'],
+  '/admin/security-operations': ['admin', 'platform_super_admin', 'compliance_admin'],
+  '/admin/registry': ['admin', 'platform_super_admin', 'clinical_safety_admin'],
+  '/admin/ai-verification': ['admin', 'platform_super_admin', 'clinical_safety_admin'],
+  '/admin/enterprise-workflows': ['admin', 'platform_super_admin', 'operations_admin', 'clinical_safety_admin'],
+  '/admin/finance': ['admin', 'platform_super_admin', 'operations_admin'],
+  '/admin/finance-controls': ['admin', 'platform_super_admin', 'operations_admin'],
 }
 export const nav = adminNav.map((item) => ({ ...item, roles: item.roles || ADMIN_NAV_ACCESS[item.to] || SUPER_ADMIN_ROLES }))
 
@@ -110,6 +111,7 @@ export const routes = [
   { path: 'feature-configuration', element: <ResourceConsole module={adminResourceModules.features} /> },
   { index: true, element: <Overview /> },
   { path: 'users', element: <Users /> },
+  { path: 'users/:id', element: <AdminUserProfile /> },
   { path: 'analytics', element: <EnterpriseAnalytics /> },
   { path: 'emergency', element: <EmergencyBoard /> },
   { path: 'theatre', element: <TheatreCases /> },

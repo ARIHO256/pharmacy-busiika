@@ -6,7 +6,7 @@ from rest_framework.test import APITestCase
 
 from accounts.models import DoctorProfile
 
-from .models import Appointment, Availability
+from .models import Appointment, AppointmentStatusHistory, Availability
 
 User = get_user_model()
 
@@ -33,7 +33,7 @@ class BaseSetup(APITestCase):
             university="Makerere University",
             cadre="medical_officer",
             license_number="MDC-100",
-            hospital="MyDoctor Hospital",
+            hospital="HealthPilot Hospital",
             fees=50000,
         )
         self.patient = User.objects.create_user(
@@ -219,6 +219,88 @@ class BookingFlowTests(BaseSetup):
         self.assertEqual(appointment.status, Appointment.Status.CANCELLED)
 
 
+class RescheduleTests(BaseSetup):
+    def _appointment(self, status_value=Appointment.Status.PENDING):
+        return Appointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            date=FUTURE_DATE,
+            start_time=datetime.time(9, 0),
+            end_time=datetime.time(9, 30),
+            status=status_value,
+        )
+
+    def test_patient_can_reschedule_and_duration_is_preserved(self):
+        appointment = self._appointment()
+        self.client.force_authenticate(self.patient)
+        response = self.client.post(
+            f"/api/appointments/{appointment.id}/reschedule/",
+            {"date": FUTURE_DATE.isoformat(), "start_time": "09:30"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.start_time, datetime.time(9, 30))
+        # The original 30-minute duration is preserved.
+        self.assertEqual(appointment.end_time, datetime.time(10, 0))
+        history = appointment.status_history.latest("created_at")
+        self.assertEqual(history.from_status, Appointment.Status.PENDING)
+        self.assertEqual(history.to_status, Appointment.Status.PENDING)
+        self.assertIn("reschedul", history.reason.lower())
+        self.assertEqual(history.metadata["from"]["start_time"], "09:00")
+        self.assertEqual(history.metadata["to"]["start_time"], "09:30")
+
+    def test_doctor_can_reschedule_confirmed_appointment(self):
+        appointment = self._appointment(Appointment.Status.CONFIRMED)
+        self.client.force_authenticate(self.doctor)
+        response = self.client.post(
+            f"/api/appointments/{appointment.id}/reschedule/",
+            {"date": FUTURE_DATE.isoformat(), "start_time": "10:30"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.start_time, datetime.time(10, 30))
+        self.assertEqual(appointment.end_time, datetime.time(11, 0))
+        self.assertEqual(appointment.status, Appointment.Status.CONFIRMED)
+
+    def test_reschedule_to_unavailable_slot_rejected(self):
+        appointment = self._appointment()
+        self.client.force_authenticate(self.patient)
+        response = self.client.post(
+            f"/api/appointments/{appointment.id}/reschedule/",
+            {"date": FUTURE_DATE.isoformat(), "start_time": "10:00"},  # inside the break window
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["detail"], "Slot not available")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.start_time, datetime.time(9, 0))
+
+    def test_reschedule_forbidden_for_other_users(self):
+        stranger = User.objects.create_user(
+            email="stranger@example.com", password="pass1234", role=User.Role.PATIENT
+        )
+        appointment = self._appointment()
+        self.client.force_authenticate(stranger)
+        response = self.client.post(
+            f"/api/appointments/{appointment.id}/reschedule/",
+            {"date": FUTURE_DATE.isoformat(), "start_time": "09:30"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_completed_appointment_cannot_be_rescheduled(self):
+        appointment = self._appointment(Appointment.Status.COMPLETED)
+        self.client.force_authenticate(self.patient)
+        response = self.client.post(
+            f"/api/appointments/{appointment.id}/reschedule/",
+            {"date": FUTURE_DATE.isoformat(), "start_time": "09:30"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+
+
 class VerificationGateTests(APITestCase):
     def setUp(self):
         self.doctor = User.objects.create_user(
@@ -259,3 +341,71 @@ class VerificationGateTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class NoShowTaskTests(APITestCase):
+    def setUp(self):
+        self.doctor = User.objects.create_user(
+            email="noshow-doc@example.com", password="pass1234", role=User.Role.DOCTOR
+        )
+        self.patient = User.objects.create_user(
+            email="noshow-pat@example.com", password="pass1234", role=User.Role.PATIENT
+        )
+
+    def test_stale_pending_appointments_marked_missed(self):
+        from communication.models import Notification
+
+        from .models import AppointmentStatusHistory
+        from .tasks import mark_no_show_appointments
+
+        old_date = datetime.date.today() - datetime.timedelta(days=3)
+        stale = Appointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            date=old_date,
+            start_time=datetime.time(9, 0),
+            end_time=datetime.time(9, 30),
+            status="pending",
+        )
+        confirmed = Appointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            date=old_date,
+            start_time=datetime.time(10, 0),
+            end_time=datetime.time(10, 30),
+            status="confirmed",
+        )
+        future = Appointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            date=FUTURE_DATE,
+            start_time=datetime.time(9, 0),
+            end_time=datetime.time(9, 30),
+            status="pending",
+        )
+
+        result = mark_no_show_appointments()
+        self.assertEqual(result["marked"], 1)
+        self.assertEqual(result["appointment_ids"], [stale.id])
+
+        stale.refresh_from_db()
+        self.assertEqual(stale.status, Appointment.Status.MISSED)
+        history = AppointmentStatusHistory.objects.get(appointment=stale)
+        self.assertEqual(history.from_status, "pending")
+        self.assertEqual(history.to_status, "missed")
+        self.assertIsNone(history.actor)
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.patient, title="Appointment missed"
+            ).exists()
+        )
+
+        # conservative: confirmed and not-yet-due appointments are untouched
+        confirmed.refresh_from_db()
+        self.assertEqual(confirmed.status, Appointment.Status.CONFIRMED)
+        future.refresh_from_db()
+        self.assertEqual(future.status, Appointment.Status.PENDING)
+
+        # idempotent: a second run has nothing left to mark
+        result = mark_no_show_appointments()
+        self.assertEqual(result["marked"], 0)

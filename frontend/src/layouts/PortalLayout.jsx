@@ -142,7 +142,7 @@ export default function PortalLayout({ title, nav = [], role = 'patient' }) {
               <HealthIcon name="heart" size={19} strokeWidth={2.2} />
             </span>
             <span className="healthos-brand-copy">
-              <strong>MyDoctor</strong>
+              <strong>HealthPilot</strong>
               <small>HealthOS · {experience.label}</small>
             </span>
           </Link>
@@ -200,7 +200,7 @@ export default function PortalLayout({ title, nav = [], role = 'patient' }) {
             <button type="button" className="healthos-icon-button mobile-menu-trigger" onClick={() => setMobileOpen(true)} aria-label="Open navigation">
               <HealthIcon name="menu" size={21}/>
             </button>
-            <Link to={homePath} className="healthos-mobile-brand"><span>M+</span> MyDoctor</Link>
+            <Link to={homePath} className="healthos-mobile-brand"><span>M+</span> HealthPilot</Link>
             <div className="healthos-page-context">
               <span>{experience.label} workspace</span>
               <strong>{activeItem?.label || title}</strong>

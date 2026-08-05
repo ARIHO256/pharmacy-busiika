@@ -80,7 +80,7 @@ class RegisterView(APIView):
 
             notify(
                 user,
-                "Welcome to MyDoctor",
+                "Welcome to HealthPilot",
                 (
                     "Your account is ready. You can start booking care immediately."
                     if user.role == User.Role.PATIENT
@@ -571,8 +571,8 @@ class SecureTokenView(APIView):
             )
             send_security_email(
                 user,
-                "Your MyDoctor sign-in code",
-                f"Your MyDoctor sign-in code is {code}. It expires in {settings.MFA_CODE_MINUTES} minutes. If this was not you, reset your password immediately.",
+                "Your HealthPilot sign-in code",
+                f"Your HealthPilot sign-in code is {code}. It expires in {settings.MFA_CODE_MINUTES} minutes. If this was not you, reset your password immediately.",
             )
             record_security_event(request, SecurityEvent.Type.MFA_CHALLENGE, user)
             return Response(
@@ -612,7 +612,7 @@ class RequestEmailVerificationView(APIView):
             minutes=settings.EMAIL_VERIFICATION_MINUTES,
         )
         url = f"{settings.FRONTEND_URL}/verify-email/{token.public_id}/{raw}"
-        send_security_email(request.user, "Verify your MyDoctor email", f"Verify your email by opening this link:\n\n{url}")
+        send_security_email(request.user, "Verify your HealthPilot email", f"Verify your email by opening this link:\n\n{url}")
         return Response({"detail": "Verification email sent."})
 
 
@@ -653,7 +653,7 @@ class ForgotPasswordView(APIView):
                 minutes=settings.PASSWORD_RESET_MINUTES,
             )
             url = f"{settings.FRONTEND_URL}/reset-password/{token.public_id}/{raw}"
-            send_security_email(user, "Reset your MyDoctor password", f"Reset your password using this link:\n\n{url}\n\nThe link expires in {settings.PASSWORD_RESET_MINUTES} minutes.")
+            send_security_email(user, "Reset your HealthPilot password", f"Reset your password using this link:\n\n{url}\n\nThe link expires in {settings.PASSWORD_RESET_MINUTES} minutes.")
         return Response({"detail": "If that account exists, a password-reset message has been sent."})
 
 
@@ -767,8 +767,8 @@ class RequestPhoneVerificationView(APIView):
 
             send_sms(
                 phone,
-                "MyDoctor phone verification",
-                f"Your MyDoctor verification code is {code}. It expires in {getattr(settings, 'PHONE_VERIFICATION_MINUTES', 10)} minutes.",
+                "HealthPilot phone verification",
+                f"Your HealthPilot verification code is {code}. It expires in {getattr(settings, 'PHONE_VERIFICATION_MINUTES', 10)} minutes.",
                 {"purpose": "phone_verification", "token_id": str(token.public_id)},
             )
         except Exception:
@@ -798,6 +798,147 @@ class VerifyPhoneView(APIView):
         user.save(update_fields=["phone_verified_at"])
         record_security_event(request, SecurityEvent.Type.PHONE_VERIFIED, user)
         return Response({"detail": "Phone number verified successfully.", "phone_verified": True})
+
+
+class PhoneLoginRequestView(APIView):
+    """Send an SMS sign-in code without revealing whether the phone is registered."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        from django.conf import settings
+        from .models import OneTimeToken, User
+        from .security import issue_token
+
+        phone = str(request.data.get("phone", "")).strip()
+        if not phone:
+            return Response({"phone": ["A phone number is required."]}, status=400)
+        user = User.objects.filter(phone=phone, is_active=True).first()
+        delivery = "sms"
+        code = None
+        if user:
+            token, code = issue_token(
+                user,
+                OneTimeToken.Purpose.PHONE_VERIFICATION,
+                request=request,
+                minutes=int(getattr(settings, "PHONE_VERIFICATION_MINUTES", 10)),
+                numeric=True,
+                metadata={"phone": phone},
+            )
+            try:
+                from communication.providers import send_sms
+
+                send_sms(
+                    phone,
+                    "HealthPilot sign-in code",
+                    f"Your HealthPilot sign-in code is {code}. It expires in {getattr(settings, 'PHONE_VERIFICATION_MINUTES', 10)} minutes.",
+                    {"purpose": "phone_login", "token_id": str(token.public_id)},
+                )
+            except Exception:
+                # Local/demo installations have no SMS credentials. The code is only
+                # exposed while DEBUG is enabled so production never leaks it.
+                delivery = "development"
+        payload = {
+            "detail": "If that phone number is registered, a sign-in code has been sent.",
+            "delivery": delivery,
+        }
+        if user and code and getattr(settings, "DEBUG", False) and delivery == "development":
+            payload["debug_code"] = code
+        return Response(payload)
+
+
+class PhoneLoginVerifyView(APIView):
+    """Exchange an SMS sign-in code for a JWT pair."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        from django.utils import timezone
+        from rest_framework.exceptions import ValidationError
+        from .models import OneTimeToken, SecurityEvent, User
+        from .security import consume_token, issue_jwt, record_security_event
+
+        phone = str(request.data.get("phone", "")).strip()
+        code = str(request.data.get("code", "")).strip()
+        if not phone or not code:
+            return Response({"detail": "phone and code are required."}, status=400)
+        user = User.objects.filter(phone=phone, is_active=True).first()
+        token = None
+        if user:
+            token = OneTimeToken.objects.filter(
+                user=user,
+                purpose=OneTimeToken.Purpose.PHONE_VERIFICATION,
+                consumed_at__isnull=True,
+            ).first()
+        if user is None or token is None:
+            # Unknown numbers get the same failure as a bad code (no enumeration).
+            raise ValidationError({"detail": "This code or link is invalid or has expired."})
+        consume_token(token.public_id, code, OneTimeToken.Purpose.PHONE_VERIFICATION)
+        if user.phone_verified_at is None:
+            user.phone_verified_at = timezone.now()
+            user.save(update_fields=["phone_verified_at"])
+            record_security_event(request, SecurityEvent.Type.PHONE_VERIFIED, user)
+        record_security_event(request, SecurityEvent.Type.LOGIN_SUCCESS, user, method="phone_code")
+        return Response(issue_jwt(user))
+
+
+class GoogleLoginView(APIView):
+    """Sign in or register with a verified Google account ID token."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        from django.conf import settings
+        from django.utils import timezone
+        from .models import SecurityEvent, User
+        from .security import issue_jwt, record_security_event
+
+        client_id = getattr(settings, "GOOGLE_CLIENT_ID", "")
+        if not client_id:
+            return Response(
+                {"detail": "Google sign-in is not configured on this server."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        raw_token = str(request.data.get("id_token", "")).strip()
+        if not raw_token:
+            return Response({"id_token": ["A Google ID token is required."]}, status=400)
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token as google_id_token
+
+        try:
+            claims = google_id_token.verify_oauth2_token(
+                raw_token, google_requests.Request(), client_id
+            )
+        except ValueError:
+            return Response(
+                {"detail": "The Google sign-in token is invalid or has expired."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        email = User.objects.normalize_email(claims.get("email", ""))
+        if not email or not claims.get("email_verified"):
+            return Response(
+                {"detail": "The Google account has no verified email address."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user = User.objects.filter(email__iexact=email).first()
+        created = False
+        if user is None:
+            user = User.objects.create_user(
+                email=email,
+                password=None,
+                role=User.Role.PATIENT,
+                first_name=str(claims.get("given_name", "") or "")[:150],
+                last_name=str(claims.get("family_name", "") or "")[:150],
+            )
+            created = True
+        elif not user.is_active:
+            return Response({"detail": "This account is inactive."}, status=status.HTTP_401_UNAUTHORIZED)
+        if user.email_verified_at is None:
+            user.email_verified_at = timezone.now()
+            user.save(update_fields=["email_verified_at"])
+            record_security_event(request, SecurityEvent.Type.EMAIL_VERIFIED, user)
+        record_security_event(request, SecurityEvent.Type.LOGIN_SUCCESS, user, method="google", created=created)
+        return Response(issue_jwt(user))
 
 
 class LogoutView(APIView):

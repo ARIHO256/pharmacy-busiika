@@ -38,7 +38,7 @@ class Command(BaseCommand):
             scope={"database_engine": settings.DATABASES["default"]["ENGINE"]},
         )
         try:
-            with tempfile.TemporaryDirectory(prefix="mydoctor-backup-") as temp_dir:
+            with tempfile.TemporaryDirectory(prefix="healthpilot-backup-") as temp_dir:
                 temp = Path(temp_dir)
                 raw = temp / "database.dump"
                 db = settings.DATABASES["default"]
@@ -58,7 +58,7 @@ class Command(BaseCommand):
                         "--file", str(raw), str(db.get("NAME") or ""),
                     ]
                     subprocess.run(command, env=env, check=True, capture_output=True, text=True)
-                compressed = temp / f"mydoctor-{timezone.now():%Y%m%dT%H%M%SZ}.dump.gz"
+                compressed = temp / f"healthpilot-{timezone.now():%Y%m%dT%H%M%SZ}.dump.gz"
                 with raw.open("rb") as source, gzip.open(compressed, "wb", compresslevel=9) as target:
                     shutil.copyfileobj(source, target)
                 digest = hashlib.sha256(compressed.read_bytes()).hexdigest()

@@ -86,6 +86,7 @@ def public_professional_payload(user, *, detail=False):
         "fees": fees,
         "bio": profile.bio,
         "average_rating": rating,
+        "photo_url": profile.photo.url if getattr(profile, "photo", None) else None,
     }
     if detail:
         data["status"] = profile.status

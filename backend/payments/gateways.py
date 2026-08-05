@@ -70,7 +70,7 @@ class FlutterwaveGateway:
                 "name": invoice.patient.display_name,
                 "phonenumber": phone or invoice.patient.phone,
             },
-            "customizations": {"title": "MyDoctor", "description": f"Payment for invoice {invoice.number}"},
+            "customizations": {"title": "HealthPilot", "description": f"Payment for invoice {invoice.number}"},
             "meta": {"invoice_id": invoice.id, "invoice_number": invoice.number},
         }
         data = _json_request(f"{self.base_url}/payments", method="POST", payload=payload, headers=self.headers)
@@ -207,7 +207,7 @@ class MtnMomoGateway:
             "currency": invoice.currency if self.environment != "sandbox" else self.currency,
             "externalId": invoice.number,
             "payer": {"partyIdType": "MSISDN", "partyId": phone},
-            "payerMessage": f"MyDoctor invoice {invoice.number}",
+            "payerMessage": f"HealthPilot invoice {invoice.number}",
             "payeeNote": f"Healthcare payment for {invoice.number}",
         }
         headers = {**self._headers(self._token()), "X-Reference-Id": reference}

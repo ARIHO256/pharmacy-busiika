@@ -178,7 +178,7 @@ export default function PharmacyStore() {
                     <img
                       src={m.image}
                       alt={m.name}
-                      className="w-full h-32 object-cover rounded-lg mb-3"
+                      className="w-full h-44 object-contain rounded-lg mb-3 bg-slate-50 border border-slate-100"
                     />
                   )}
                   <div className="flex items-start justify-between gap-2">
@@ -204,6 +204,7 @@ export default function PharmacyStore() {
                       max={m.stock}
                       value={qtys[m.id] || 1}
                       onChange={(e) => setQtys({ ...qtys, [m.id]: e.target.value })}
+                      aria-label={`Quantity of ${m.name}`}
                       className="w-16 px-2 py-1.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                     />
                     <Button

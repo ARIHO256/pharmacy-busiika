@@ -41,14 +41,16 @@ def ensure_default_role_context(sender, instance, created, **kwargs):
     try:
         from .models import ActiveRoleContext, RoleContext
         context, _ = RoleContext.objects.get_or_create(
-            user=instance,
+            user_id=instance.id,
             organization=None,
             location=None,
             department=None,
             role_code=instance.role,
             defaults={"title": instance.get_role_display(), "is_primary": True, "active": True},
         )
-        ActiveRoleContext.objects.get_or_create(user=instance, defaults={"context": context})
+        # Pass user_id (not the instance) so the reverse one-to-one accessor on the
+        # just-created user object is not populated with a stale cached value.
+        ActiveRoleContext.objects.get_or_create(user_id=instance.id, defaults={"context": context})
     except Exception:
         # During initial migration/syncdb the enterprise tables may not exist yet.
         return

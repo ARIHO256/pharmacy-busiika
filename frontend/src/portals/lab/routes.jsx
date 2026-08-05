@@ -14,6 +14,7 @@ import WorkforceSchedule from '../operations/WorkforceSchedule'
 import Subscriptions from '../operations/Subscriptions'
 import SupportCentre from '../operations/SupportCentre'
 import NotificationConsole from '../operations/NotificationConsole'
+import TeamSchedule from '../staff/TeamSchedule'
 
 export const nav = [
   { to: '/lab', label: 'Diagnostics Home', icon: 'dashboard', end: true, group: 'Overview', description: 'Work queue, turnaround and critical alerts' },
@@ -32,6 +33,7 @@ export const nav = [
   { to: '/lab/support', label: 'Support', icon: 'help', group: 'Settings', description: 'Platform support and issue tracking' },
   { to: '/lab/profile', label: 'Laboratory Profile', icon: 'settings', group: 'Settings', description: 'Branches, accreditation and services' },
 
+  { to: '/lab/team-schedule', label: 'Team Schedule', icon: 'calendar', group: 'Professional tools', description: 'Upcoming appointments for every provider in your organization' },
   ...deepNav('lab', 'lab', { label: 'Complete page centre', group: 'Professional tools' }),
 ]
 
@@ -52,5 +54,6 @@ export const routes = [
   { path: 'support', element: <SupportCentre /> },
   { path: 'profile', element: <ProviderProfile /> },
 
+  { path: 'team-schedule', element: <TeamSchedule /> },
   ...deepRoutes('lab', 'lab', { title: 'Laboratory organization page centre' }),
 ]

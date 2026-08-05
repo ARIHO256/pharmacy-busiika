@@ -16,7 +16,10 @@ User = get_user_model()
 class InteroperabilityTests(APITestCase):
     def setUp(self):
         self.patient = User.objects.create_user(email="fhir-patient@example.com", password="pass123456", role="patient", first_name="Amina", last_name="N")
-        self.doctor = User.objects.create_user(email="fhir-doctor@example.com", password="pass123456", role="doctor")
+        self.doctor = User.objects.create_user(email="fhir-doctor@example.com", password="pass123456", role="doctor", is_verified=True)
+        from accounts.models import DoctorProfile, ProfileStatus
+
+        DoctorProfile.objects.create(user=self.doctor, status=ProfileStatus.VERIFIED)
         self.admin = User.objects.create_user(email="fhir-admin@example.com", password="pass123456", role="admin")
         self.appointment = Appointment.objects.create(
             patient=self.patient,

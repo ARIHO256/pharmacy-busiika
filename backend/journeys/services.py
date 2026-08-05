@@ -1671,7 +1671,7 @@ def _adapter_on_action(case, definition, action_code, payload, user, request):
                     from communication.services import notify
                     notify(
                         order.patient, "Laboratory result released",
-                        f"Your {order.test.name} result is now available in MyDoctor.",
+                        f"Your {order.test.name} result is now available in HealthPilot.",
                         kind="laboratory", priority="high", channels=["in_app", "email"],
                         metadata={"lab_order_id": order.id, "workflow_case": str(case.public_id)},
                     )
@@ -1980,6 +1980,13 @@ def _adapter_on_action(case, definition, action_code, payload, user, request):
         appointment = case.appointment
         new_date = datetime.date.fromisoformat(case.data["new_date"])
         new_start = datetime.time.fromisoformat(case.data["new_start_time"])
+        if not (new_date == appointment.date and new_start == appointment.start_time):
+            # Validate the requested slot before saving; raising here rolls back
+            # the whole approval inside perform_action's transaction.
+            from appointments.services import find_slot
+
+            if find_slot(appointment.doctor, new_date, new_start) is None:
+                raise ValidationError({"appointment": "The requested slot is not available."})
         old_start = datetime.datetime.combine(appointment.date, appointment.start_time)
         old_end = datetime.datetime.combine(appointment.date, appointment.end_time)
         duration = old_end - old_start
@@ -2212,7 +2219,7 @@ def render_document_pdf(document):
     stream = BytesIO()
     doc = SimpleDocTemplate(stream, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=18 * mm, bottomMargin=18 * mm)
     styles = getSampleStyleSheet()
-    story = [Paragraph("MyDoctor HealthOS", styles["Title"]), Paragraph(document.title, styles["Heading1"]), Spacer(1, 8)]
+    story = [Paragraph("HealthPilot HealthOS", styles["Title"]), Paragraph(document.title, styles["Heading1"]), Spacer(1, 8)]
     story.append(Paragraph(f"Patient: {document.patient.display_name}", styles["BodyText"]))
     story.append(Paragraph(f"Document type: {document.document_type.replace('_', ' ').title()}", styles["BodyText"]))
     story.append(Paragraph(f"Verification code: {document.verification_code}", styles["BodyText"]))
@@ -2237,6 +2244,6 @@ def render_document_pdf(document):
     widget.barHeight = (bounds[3] - bounds[1]) * scale
     drawing.add(widget)
     story.append(drawing)
-    story.append(Paragraph("Verify this document in the MyDoctor verification portal. Any alteration invalidates the signature.", styles["Italic"]))
+    story.append(Paragraph("Verify this document in the HealthPilot verification portal. Any alteration invalidates the signature.", styles["Italic"]))
     doc.build(story)
     return stream.getvalue()

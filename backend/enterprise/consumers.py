@@ -116,7 +116,7 @@ class TelemedicineConsumer(AuthenticatedConsumer):
             return
         self.group_name = f"telemedicine-{self.session_id}"
         await self.channel_layer.group_add(self.group_name, self.channel_name)
-        await self.channel_layer.group_send(self.group_name, {"type": "session.presence", "user_id": self.scope["user"].id, "status": "connected"})
+        await self.channel_layer.group_send(self.group_name, {"type": "session.presence", "user_id": self.scope["user"].id, "status": "connected", "mode": getattr(self, "session_mode", "video")})
 
     async def disconnect(self, close_code):
         if hasattr(self, "group_name"):
@@ -132,7 +132,10 @@ class TelemedicineConsumer(AuthenticatedConsumer):
         await self.send_json({"type": "session.control", **event})
 
     async def session_presence(self, event):
-        await self.send_json({"type": "session.presence", "user_id": event["user_id"], "status": event["status"]})
+        payload = {"type": "session.presence", "user_id": event["user_id"], "status": event["status"]}
+        if event.get("mode"):
+            payload["mode"] = event["mode"]
+        await self.send_json(payload)
 
     @database_sync_to_async
     def can_join(self):
@@ -142,6 +145,7 @@ class TelemedicineConsumer(AuthenticatedConsumer):
         session = TelemedicineSession.objects.filter(public_id=self.session_id).first()
         if not session:
             return False
+        self.session_mode = session.mode
         return bool(
             session.participants.filter(user=user).exists()
             or is_platform_super_admin(user)

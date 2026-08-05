@@ -54,7 +54,13 @@ export default function Invoices() {
     {
       key: 'for',
       label: 'For',
-      render: (i) => <span className="text-slate-600">{i.appointment_info || 'Appointment'}</span>,
+      render: (i) => (
+        <span className="text-slate-600">
+          {i.appointment_info
+            ? `${i.appointment_info.doctor_name || 'Appointment'} · ${i.appointment_info.date || ''}`
+            : 'Appointment'}
+        </span>
+      ),
     },
     { key: 'amount', label: 'Amount', render: (i) => <span className="font-medium">{fmtUGX(i.amount)}</span> },
     {

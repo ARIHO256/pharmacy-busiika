@@ -4,6 +4,8 @@ from unittest import skipUnless
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
+from accounts.models import DoctorProfile, ProfileStatus, ProviderProfile
+
 from .models import Prescription
 
 User = get_user_model()
@@ -36,7 +38,8 @@ def make_appointment(doctor, patient, status="confirmed"):
 @skipUnless(HAS_APPOINTMENTS, "appointments app not available in this worktree")
 class PrescriptionFlowTests(APITestCase):
     def setUp(self):
-        self.doctor = make_user("doc@example.com", "doctor", first_name="Greg", last_name="House")
+        self.doctor = make_user("doc@example.com", "doctor", first_name="Greg", last_name="House", is_verified=True)
+        DoctorProfile.objects.create(user=self.doctor, status=ProfileStatus.VERIFIED)
         self.patient = make_user("pat@example.com", "patient", first_name="Pat")
         self.appointment = make_appointment(self.doctor, self.patient)
 
@@ -112,3 +115,68 @@ class PrescriptionFlowTests(APITestCase):
         # A configured pharmacy returns 201; an unavailable integration returns 503;
         # an unknown pharmacy is correctly rejected with 404.
         self.assertIn(resp.status_code, (201, 404, 503))
+
+    def _issue_prescription(self):
+        self.client.force_authenticate(self.doctor)
+        resp = self.client.post(
+            f"/api/appointments/{self.appointment.id}/prescription/",
+            {
+                "notes": "take with food",
+                "items": [
+                    {
+                        "medicine_name": "Amoxicillin",
+                        "dosage": "500mg",
+                        "frequency": "3x daily",
+                        "duration": "7 days",
+                        "quantity": 21,
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        return Prescription.objects.get()
+
+    def test_prescription_pdf_for_doctor_patient_and_admin(self):
+        rx = self._issue_prescription()
+        for user in (self.doctor, self.patient, make_user("admin@example.com", "admin")):
+            self.client.force_authenticate(user)
+            resp = self.client.get(f"/api/prescriptions/{rx.id}/pdf/")
+            self.assertEqual(resp.status_code, 200, resp.content)
+            self.assertEqual(resp["Content-Type"], "application/pdf")
+            self.assertTrue(resp.content.startswith(b"%PDF"))
+
+    def test_prescription_pdf_forbidden_for_outsider(self):
+        rx = self._issue_prescription()
+        other = make_user("outsider@example.com", "patient")
+        self.client.force_authenticate(other)
+        self.assertEqual(self.client.get(f"/api/prescriptions/{rx.id}/pdf/").status_code, 403)
+
+    def test_doctor_can_send_to_pharmacy(self):
+        from services.models import PharmacyOrder
+
+        rx = self._issue_prescription()
+        pharmacy = make_user("pharm@example.com", "pharmacy")
+        ProviderProfile.objects.create(
+            user=pharmacy, organization_type="pharmacy", status=ProfileStatus.VERIFIED
+        )
+        self.client.force_authenticate(self.doctor)
+        resp = self.client.post(
+            f"/api/prescriptions/{rx.id}/send-to-pharmacy/",
+            {"pharmacy_id": pharmacy.id},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        order = PharmacyOrder.objects.get()
+        self.assertEqual(order.pharmacy, pharmacy)
+        self.assertEqual(order.patient, self.patient)
+
+        # patient path still works and is idempotent for the same pharmacy
+        self.client.force_authenticate(self.patient)
+        resp = self.client.post(
+            f"/api/prescriptions/{rx.id}/send-to-pharmacy/",
+            {"pharmacy_id": pharmacy.id},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertFalse(resp.data["created"])

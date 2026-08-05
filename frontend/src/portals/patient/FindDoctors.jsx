@@ -95,13 +95,22 @@ export default function FindDoctors() {
               className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:border-primary-300 hover:shadow transition"
             >
               <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-semibold text-slate-800">
-                    {['doctor', 'dentist'].includes(d.role) ? 'Dr. ' : ''}{d.first_name} {d.last_name}
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <Badge color="blue">{d.role_label || d.cadre}</Badge>
-                    <span className="text-sm text-primary-600">{d.specialization || d.cadre || 'General care'}</span>
+                <div className="flex items-start gap-3">
+                  {d.photo_url ? (
+                    <img src={d.photo_url} alt={`${d.first_name} ${d.last_name}`} className="h-12 w-12 shrink-0 rounded-xl border border-slate-200 object-cover" />
+                  ) : (
+                    <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-primary-50 text-sm font-bold text-primary-700">
+                      {(d.first_name || '')[0]}{(d.last_name || '')[0]}
+                    </span>
+                  )}
+                  <div>
+                    <div className="font-semibold text-slate-800">
+                      {['doctor', 'dentist'].includes(d.role) ? 'Dr. ' : ''}{d.first_name} {d.last_name}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <Badge color="blue">{d.role_label || d.cadre}</Badge>
+                      <span className="text-sm text-primary-600">{d.specialization || d.cadre || 'General care'}</span>
+                    </div>
                   </div>
                 </div>
                 <span className="text-2xl">🩺</span>

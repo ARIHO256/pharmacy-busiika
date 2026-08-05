@@ -51,12 +51,12 @@ class MultiRoleContextTests(TestCase):
         self.user = User.objects.create_user(
             email="multi@example.test", password="StrongPass!2026", role="doctor", is_verified=True
         )
-        self.doctor = RoleContext.objects.create(user=self.user, role_code="doctor", is_primary=True)
+        self.doctor = self.user.role_contexts.get(role_code="doctor")
         self.director = RoleContext.objects.create(user=self.user, role_code="medical_director")
 
     def test_user_can_hold_and_activate_multiple_contexts(self):
         self.assertEqual(self.user.role_contexts.count(), 2)
-        active = ActiveRoleContext.objects.create(user=self.user, context=self.director)
+        active, _ = ActiveRoleContext.objects.update_or_create(user=self.user, defaults={"context": self.director})
         active.full_clean()
         self.assertEqual(active.context.role_code, "medical_director")
 
@@ -173,7 +173,7 @@ class EnterpriseApiTests(TestCase):
         self.client.force_authenticate(self.admin)
         response = self.client.get("/api/v1/enterprise/metrics/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("mydoctor_users_total", response.content.decode())
+        self.assertIn("healthpilot_users_total", response.content.decode())
 
     def test_role_dashboard_returns_role_specific_summary(self):
         self.client.force_authenticate(self.admin)
@@ -208,3 +208,38 @@ class FhirExportTests(TestCase):
         self.assertEqual(bundle["resourceType"], "Bundle")
         self.assertEqual(bundle["type"], "collection")
         self.assertEqual(bundle["total"], 0)
+
+
+class TelemedicineSessionModeTests(TestCase):
+    def _appointment(self, doctor, patient):
+        import datetime
+
+        from appointments.models import Appointment
+
+        return Appointment.objects.create(
+            patient=patient,
+            doctor=doctor,
+            date=datetime.date(2030, 1, 1),
+            start_time=datetime.time(10, 0),
+            end_time=datetime.time(10, 30),
+            status="confirmed",
+        )
+
+    def test_audio_mode_persisted_and_jitsi_audio_only_urls(self):
+        from enterprise.services import create_telemedicine_session
+
+        doctor = User.objects.create_user(email="tm-doc@example.test", password="StrongPass!2026", role="doctor", is_verified=True)
+        patient = User.objects.create_user(email="tm-pat@example.test", password="StrongPass!2026", role="patient")
+        session = create_telemedicine_session(self._appointment(doctor, patient), mode="audio")
+        self.assertEqual(session.mode, "audio")
+        self.assertIn("config.startAudioOnly=true", session.join_url)
+        self.assertIn("config.startWithVideoMuted=true", session.host_url)
+
+    def test_default_mode_is_video(self):
+        from enterprise.services import create_telemedicine_session
+
+        doctor = User.objects.create_user(email="tm-doc2@example.test", password="StrongPass!2026", role="doctor", is_verified=True)
+        patient = User.objects.create_user(email="tm-pat2@example.test", password="StrongPass!2026", role="patient")
+        session = create_telemedicine_session(self._appointment(doctor, patient))
+        self.assertEqual(session.mode, "video")
+        self.assertNotIn("startAudioOnly", session.join_url)

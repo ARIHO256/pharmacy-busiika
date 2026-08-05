@@ -38,7 +38,7 @@ export default function Login() {
   return (
     <main className="healthos-auth-shell">
       <section className="healthos-auth-story">
-        <Link to="/" className="healthos-auth-brand"><span><HealthIcon name="heart" size={19} /></span><div><strong>MyDoctor</strong><small>Connected Healthcare OS</small></div></Link>
+        <Link to="/" className="healthos-auth-brand"><span><HealthIcon name="heart" size={19} /></span><div><strong>HealthPilot</strong><small>Connected Healthcare OS</small></div></Link>
         <div className="healthos-auth-copy">
           <span className="healthos-auth-kicker">Patients · Doctors · Connected care</span>
           <h1>Every care journey.<br /><em>One secure workspace.</em></h1>
@@ -66,7 +66,7 @@ export default function Login() {
             {error && <div className="healthos-auth-error"><HealthIcon name="alert" size={17} />{error}</div>}
             <Button type="submit" className="w-full" disabled={busy}>{busy ? 'Checking…' : challenge ? 'Verify and sign in' : 'Sign in securely'}<HealthIcon name="arrow" size={17} /></Button>
           </form>
-          <div className="healthos-auth-divider"><span>New to MyDoctor?</span></div>
+          <div className="healthos-auth-divider"><span>New to HealthPilot?</span></div>
           <Link to="/register" className="healthos-auth-secondary">Create an account <HealthIcon name="arrow" size={16} /></Link>
           <p className="healthos-auth-legal">By continuing, you agree to the platform terms, privacy notice and appropriate healthcare-data use.</p>
         </div>

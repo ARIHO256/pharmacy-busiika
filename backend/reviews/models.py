@@ -4,6 +4,11 @@ from django.db import models
 
 
 class Review(models.Model):
+    class Status(models.TextChoices):
+        VISIBLE = "visible", "Visible"
+        FLAGGED = "flagged", "Flagged"
+        HIDDEN = "hidden", "Hidden"
+
     patient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -23,6 +28,18 @@ class Review(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(5)]
     )
     comment = models.TextField(blank=True, default="")
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.VISIBLE
+    )
+    moderated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="moderated_reviews",
+    )
+    moderated_at = models.DateTimeField(null=True, blank=True)
+    moderation_note = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

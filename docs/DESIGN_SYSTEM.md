@@ -1,4 +1,4 @@
-# MyDoctor Design System
+# HealthPilot Design System
 
 The palette extends the supplied flow-chart colours into semantic application tokens. Colour supports meaning but must never be the only status indicator.
 

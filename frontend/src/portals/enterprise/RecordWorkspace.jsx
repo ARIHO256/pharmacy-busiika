@@ -39,7 +39,7 @@ function entityValue(form, key) {
 }
 
 export default function RecordWorkspace({ module }) {
-  const draftKey = `mydoctor:draft:${module.id}`
+  const draftKey = `healthpilot:draft:${module.id}`
   const [catalog, setCatalog] = useState({})
   const [records, setRecords] = useState([])
   const [selectedType, setSelectedType] = useState(module.recordTypes[0])
@@ -247,7 +247,7 @@ export default function RecordWorkspace({ module }) {
 
       <Card title={schema?.label || module.label} subtitle={`${filtered.length} accessible record${filtered.length === 1 ? '' : 's'}`} icon={module.icon} actions={<div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => download(`${selectedType}-${new Date().toISOString().slice(0,10)}.csv`, toCsv(exportRows))}><HealthIcon name="download" size={15}/> Export</Button><Button variant="outline" onClick={() => window.print()}><HealthIcon name="file" size={15}/> Print</Button></div>}>
         <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_190px_190px_auto]">
-          <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); load() }}><Input aria-label="Search records" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search reference, patient or summary" className="flex-1"/><Button type="submit" variant="outline"><HealthIcon name="search" size={15}/></Button></form>
+          <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); load() }}><Input aria-label="Search records" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search reference, patient or summary" className="flex-1"/><Button type="submit" variant="outline" aria-label="Search records"><HealthIcon name="search" size={15}/></Button></form>
           <Select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option>{availableStatuses.map((value) => <option key={value} value={value}>{value.replaceAll('_',' ')}</option>)}</Select>
           <Select aria-label="Filter by priority" value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}><option value="">All priorities</option><option value="routine">Routine</option><option value="high">High</option><option value="urgent">Urgent</option><option value="critical">Critical</option></Select>
           <Button variant="ghost" onClick={() => { setQuery(''); setStatusFilter(''); setPriorityFilter(''); setTimeout(load, 0) }}><HealthIcon name="refresh" size={15}/> Reset</Button>

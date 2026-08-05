@@ -77,13 +77,17 @@ export default function Appointments() {
         phone: phone || undefined,
         gateway,
       })
-      if (data.mock && !allowMockPayments) {
+      if (data.mock && !allowMockPayments && !data.simulated) {
         throw new Error('Mock payments are disabled in this build.')
       }
       if (data.mock && data.checkout_url) {
         await client.post(data.checkout_url.replace(/^\/api/, ''))
         setPayFor(null)
-        setNotice('Payment successful — your appointment is confirmed.')
+        setNotice(
+          data.simulated
+            ? 'Payment simulated successfully (demo gateway) — your appointment is confirmed.'
+            : 'Payment successful — your appointment is confirmed.'
+        )
         load()
       } else if (data.checkout_url) {
         setNotice(`Opening secure ${data.gateway} checkout for invoice ${data.invoice_number}.`)

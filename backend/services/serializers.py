@@ -104,6 +104,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "status",
             "total",
             "delivery",
+            "delivery_fee",
             "address",
             "created_at",
             "items",

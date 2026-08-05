@@ -3,7 +3,6 @@ from django.core.mail import EmailMessage
 from django.http import HttpResponse
 import logging
 import os
-from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Sum
 from django.shortcuts import get_object_or_404
@@ -22,6 +21,7 @@ from enterprise.access import active_role, is_platform_super_admin
 from .gateways import get_gateway
 from .models import (
     CashierShift,
+    CommissionRule,
     Invoice,
     InvoiceItem,
     PaymentTransaction,
@@ -31,11 +31,20 @@ from .models import (
 from .serializers import (
     CashierInvoiceCreateSerializer,
     CashierShiftSerializer,
+    CommissionRuleSerializer,
     InvoiceSerializer,
     PayoutSerializer,
     ReceiptSerializer,
+    WalletTransactionSerializer,
 )
-from .services import confirm_invoice_payment, doctor_earnings, record_invoice_paid
+from .services import (
+    confirm_invoice_payment,
+    doctor_earnings,
+    pay_invoice_from_wallet,
+    process_payout,
+    record_invoice_paid,
+    wallet_for,
+)
 
 PAYMENT_METHODS = {"mobile_money", "card", "wallet"}
 CASHIER_ROLES = ["cashier", "admin"]
@@ -104,26 +113,64 @@ def _emit(name, invoice, payload, request=None):
         pass
 
 
-class InitiatePaymentView(APIView):
-    permission_classes = [IsRole]
-    allowed_roles = ["patient"]
+def _payable_error(detail, code):
+    return None, Response({"detail": detail}, status=code)
 
-    @transaction.atomic
-    def post(self, request):
-        appointment_id = request.data.get("appointment_id")
-        method = request.data.get("method")
-        phone = request.data.get("phone")
-        requested_gateway = str(request.data.get("gateway") or "").strip().lower()
-        if not appointment_id:
-            return Response({"detail": "appointment_id is required"}, status=400)
-        if method not in PAYMENT_METHODS:
-            return Response(
-                {"detail": "method must be one of mobile_money, card, wallet"}, status=400
-            )
 
+def _simulation_fallback_allowed():
+    """Demo/simulation mode: fall back to the mock gateway when the configured
+    real gateway cannot run (missing sandbox credentials, unreachable API).
+
+    Enabled whenever mock payments are on (the dev/demo default) or when
+    PAYMENT_SIMULATION_FALLBACK=true is set explicitly. Never silently on in a
+    real deployment: MOCK_PAYMENTS defaults to DEBUG and production config
+    sets it false.
+    """
+    if settings.MOCK_PAYMENTS:
+        return True
+    return os.getenv("PAYMENT_SIMULATION_FALLBACK", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _initiate_with_simulation_fallback(invoice, phone):
+    """Initiate the invoice on its configured gateway; on gateway failure in
+    simulation mode, re-point the invoice at the mock gateway and initiate
+    there. Returns (result, simulated)."""
+    try:
+        gateway = get_gateway(invoice.gateway)
+        return gateway.initiate(invoice, phone=phone), False
+    except Exception:
+        if invoice.gateway == Invoice.Gateway.MOCK or not _simulation_fallback_allowed():
+            raise
+    invoice.gateway = Invoice.Gateway.MOCK
+    invoice.save(update_fields=["gateway", "updated_at"])
+    result = get_gateway(Invoice.Gateway.MOCK).initiate(invoice, phone=phone)
+    return result, True
+
+
+def _resolve_payable(request):
+    """Resolve what an initiation request pays for.
+
+    Returns ``(payable, error_response)`` where payable carries everything the
+    view needs to build or reuse an invoice for the source object.
+    """
+    params = {
+        "appointment": request.data.get("appointment_id"),
+        "order": request.data.get("order_id"),
+        "lab_order": request.data.get("lab_order_id"),
+        "hospital_booking": request.data.get("hospital_booking_id"),
+    }
+    provided = {kind: value for kind, value in params.items() if value}
+    if len(provided) != 1:
+        return _payable_error(
+            "Provide exactly one of appointment_id, order_id, lab_order_id or hospital_booking_id.",
+            400,
+        )
+    kind, value = next(iter(provided.items()))
+
+    if kind == "appointment":
         from appointments.models import Appointment
 
-        appointment = Appointment.objects.filter(pk=appointment_id).select_related(
+        appointment = Appointment.objects.filter(pk=value).select_related(
             "patient", "doctor__doctor_profile", "doctor__staff_profile"
         ).first()
         if appointment is not None and appointment.patient_id != request.user.id:
@@ -138,92 +185,255 @@ class InitiatePaymentView(APIView):
             if relation is None:
                 appointment = None
         if appointment is None:
-            return Response({"detail": "Appointment not found"}, status=404)
+            return _payable_error("Appointment not found", 404)
         if appointment.status in {
             Appointment.Status.CANCELLED,
             Appointment.Status.COMPLETED,
             Appointment.Status.MISSED,
         }:
-            return Response(
-                {"detail": "This appointment cannot be paid in its current state."},
-                status=409,
-            )
-
+            return _payable_error("This appointment cannot be paid in its current state.", 409)
         provider_profile = professional_profile(appointment.doctor)
         amount = (getattr(provider_profile, "fees", None) or getattr(provider_profile, "consultation_fee", 0) or 0)
+        return {
+            "label": "Appointment",
+            "lookup": {"patient": appointment.patient, "appointment": appointment},
+            "create": {
+                "patient": appointment.patient,
+                "appointment": appointment,
+                "source_type": Invoice.SourceType.APPOINTMENT,
+                "source_id": str(appointment.id),
+            },
+            "items": [{
+                "code": "CONSULTATION",
+                "description": f"Consultation with {_display_name(appointment.doctor)}",
+                "quantity": 1,
+                "unit_price": amount,
+                "service_type": "consultation",
+                "source_id": str(appointment.id),
+            }],
+            "meta": {"appointment_id": appointment.id},
+        }, None
+
+    if kind == "order":
+        from services.models import Order
+
+        order = Order.objects.filter(pk=value).prefetch_related("items").first()
+        if order is None or order.patient_id != request.user.id:
+            return _payable_error("Order not found", 404)
+        if order.status in {Order.Status.CANCELLED, Order.Status.DELIVERED}:
+            return _payable_error("This order cannot be paid in its current state.", 409)
+        items = [
+            {
+                "code": "PHARMACY",
+                "description": item.name,
+                "quantity": item.qty,
+                "unit_price": item.price,
+                "service_type": "pharmacy",
+                "source_id": str(order.id),
+            }
+            for item in order.items.all()
+        ]
+        if order.delivery and order.delivery_fee:
+            items.append({
+                "code": "DELIVERY",
+                "description": "Home delivery fee",
+                "quantity": 1,
+                "unit_price": order.delivery_fee,
+                "service_type": "delivery",
+                "source_id": str(order.id),
+            })
+        return {
+            "label": "Order",
+            "lookup": {"source_type": Invoice.SourceType.ORDER, "source_id": str(order.id)},
+            "create": {
+                "patient": order.patient,
+                "source_type": Invoice.SourceType.ORDER,
+                "source_id": str(order.id),
+            },
+            "items": items,
+            "meta": {"order_id": order.id},
+        }, None
+
+    if kind == "lab_order":
+        from services.models import LabOrder
+
+        order = LabOrder.objects.filter(pk=value).select_related("test").first()
+        if order is None or order.patient_id != request.user.id:
+            return _payable_error("Lab order not found", 404)
+        if order.status in {
+            LabOrder.Status.CANCELLED,
+            LabOrder.Status.REJECTED,
+            LabOrder.Status.COMPLETED,
+        }:
+            return _payable_error("This lab order cannot be paid in its current state.", 409)
+        if order.test.price <= 0:
+            return _payable_error("This lab order has nothing to pay.", 400)
+        return {
+            "label": "Lab order",
+            "lookup": {"source_type": Invoice.SourceType.LAB_ORDER, "source_id": str(order.id)},
+            "create": {
+                "patient": order.patient,
+                "source_type": Invoice.SourceType.LAB_ORDER,
+                "source_id": str(order.id),
+            },
+            "items": [{
+                "code": "LABTEST",
+                "description": order.test.name,
+                "quantity": 1,
+                "unit_price": order.test.price,
+                "service_type": "lab_test",
+                "source_id": str(order.id),
+            }],
+            "meta": {"lab_order_id": order.id},
+        }, None
+
+    from services.models import HospitalBooking
+
+    booking = HospitalBooking.objects.filter(pk=value).select_related("service").first()
+    if booking is None or booking.patient_id != request.user.id:
+        return _payable_error("Hospital booking not found", 404)
+    if booking.status in {HospitalBooking.Status.CANCELLED, HospitalBooking.Status.COMPLETED}:
+        return _payable_error("This booking cannot be paid in its current state.", 409)
+    if booking.service is None or booking.service.price <= 0:
+        return _payable_error("This booking has nothing to pay.", 400)
+    return {
+        "label": "Hospital booking",
+        "lookup": {"source_type": Invoice.SourceType.HOSPITAL_BOOKING, "source_id": str(booking.id)},
+        "create": {
+            "patient": booking.patient,
+            "source_type": Invoice.SourceType.HOSPITAL_BOOKING,
+            "source_id": str(booking.id),
+        },
+        "items": [{
+            "code": "HOSPITAL-SERVICE",
+            "description": booking.service.name,
+            "quantity": 1,
+            "unit_price": booking.service.price,
+            "service_type": "hospital_service",
+            "source_id": str(booking.id),
+        }],
+        "meta": {"hospital_booking_id": booking.id},
+    }, None
+
+
+def _create_invoice_items(invoice, items):
+    for item in items:
+        InvoiceItem.objects.create(invoice=invoice, **item)
+    invoice.recalculate_amount()
+
+
+class InitiatePaymentView(APIView):
+    permission_classes = [IsRole]
+    allowed_roles = ["patient"]
+
+    @transaction.atomic
+    def post(self, request):
+        method = request.data.get("method")
+        phone = request.data.get("phone")
+        requested_gateway = str(request.data.get("gateway") or "").strip().lower()
+        if method not in PAYMENT_METHODS:
+            return Response(
+                {"detail": "method must be one of mobile_money, card, wallet"}, status=400
+            )
+        payable, error = _resolve_payable(request)
+        if error is not None:
+            return error
         existing = (
             Invoice.objects.filter(
-                patient=appointment.patient,
-                appointment=appointment,
                 status__in=[
                     Invoice.Status.PENDING,
                     Invoice.Status.PARTIALLY_PAID,
                     Invoice.Status.PAID,
                 ],
+                **payable["lookup"],
             )
             .order_by("-created_at")
             .first()
         )
         if existing and existing.status == Invoice.Status.PAID:
             return Response(
-                {"detail": "Appointment is already paid.", "invoice_number": existing.number},
+                {"detail": f"{payable['label']} is already paid.", "invoice_number": existing.number},
                 status=409,
             )
+
+        if method == "wallet":
+            invoice = existing or Invoice.objects.create(
+                gateway=Invoice.Gateway.WALLET, **payable["create"]
+            )
+            if not invoice.items.exists():
+                _create_invoice_items(invoice, payable["items"])
+            try:
+                payment, receipt, invoice = pay_invoice_from_wallet(
+                    invoice=invoice, user=request.user
+                )
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=400)
+            _audit(request, "payment.initiated", invoice, {"method": method, **payable["meta"]})
+            _emit(
+                "payment.initiated",
+                invoice,
+                {
+                    "invoice_number": invoice.number,
+                    "amount": invoice.amount,
+                    "currency": invoice.currency,
+                    "gateway": invoice.gateway,
+                    "method": method,
+                    "status": invoice.status,
+                    **payable["meta"],
+                },
+                request,
+            )
+            return Response(
+                {
+                    "invoice_number": invoice.number,
+                    "amount": invoice.amount,
+                    "ref": payment.number,
+                    "receipt_number": receipt.number,
+                    "gateway": invoice.gateway,
+                    "status": invoice.status,
+                    "mock": False,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
         gateway_by_method = {
             "mobile_money": {"mtn_momo", "airtel_money", "flutterwave", "mock"},
             "card": {"flutterwave", "paystack", "mock"},
-            "wallet": {"mock"},
         }
         default_gateway = Invoice.Gateway.MOCK if settings.MOCK_PAYMENTS else os.getenv("PAYMENT_GATEWAY", Invoice.Gateway.FLUTTERWAVE)
         selected_gateway = requested_gateway or default_gateway
         if selected_gateway not in gateway_by_method[method]:
             return Response({"detail": f"Gateway {selected_gateway} is not available for {method}."}, status=400)
         invoice = existing or Invoice.objects.create(
-            patient=appointment.patient,
-            appointment=appointment,
-            amount=amount,
             gateway=selected_gateway,
+            **payable["create"],
         )
         if existing and existing.status != Invoice.Status.PAID and existing.gateway != selected_gateway:
             existing.gateway = selected_gateway
             existing.gateway_ref = ""
             existing.save(update_fields=["gateway", "gateway_ref", "updated_at"])
         if not invoice.items.exists():
-            InvoiceItem.objects.create(
-                invoice=invoice,
-                code="CONSULTATION",
-                description=f"Consultation with {_display_name(appointment.doctor)}",
-                quantity=1,
-                unit_price=amount,
-                service_type="consultation",
-                source_id=str(appointment.id),
-            )
-            invoice.recalculate_amount()
-        gateway = get_gateway(invoice.gateway)
+            _create_invoice_items(invoice, payable["items"])
+        simulated = False
         try:
-            result = gateway.initiate(invoice, phone=phone)
+            result, simulated = _initiate_with_simulation_fallback(invoice, phone)
         except Exception as exc:
             return Response(
                 {"detail": f"{invoice.gateway} gateway could not be initialized: {exc}"}, status=503
             )
         invoice.gateway_ref = result["ref"]
         invoice.save(update_fields=["gateway_ref", "updated_at"])
-        _audit(
-            request,
-            "payment.initiated",
-            invoice,
-            {"method": method, "appointment_id": appointment.id},
-        )
+        _audit(request, "payment.initiated", invoice, {"method": method, "simulated": simulated, **payable["meta"]})
         _emit(
             "payment.initiated",
             invoice,
             {
                 "invoice_number": invoice.number,
-                "appointment_id": appointment.id,
                 "amount": invoice.amount,
                 "currency": invoice.currency,
                 "gateway": invoice.gateway,
                 "method": method,
+                **payable["meta"],
             },
             request,
         )
@@ -237,6 +447,7 @@ class InitiatePaymentView(APIView):
                 "gateway": invoice.gateway,
                 "status": result.get("status", "initiated"),
                 "mock": invoice.gateway == Invoice.Gateway.MOCK,
+                "simulated": simulated,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -253,7 +464,7 @@ class PaymentStatusView(APIView):
         if request_role(request) == "patient" and invoice.patient_id != request.user.id:
             return Response({"detail": "Not permitted."}, status=403)
         verification = None
-        if invoice.status not in {Invoice.Status.PAID, Invoice.Status.VOID, Invoice.Status.REFUNDED} and invoice.gateway_ref and invoice.gateway not in {Invoice.Gateway.MOCK, Invoice.Gateway.CASH, Invoice.Gateway.BANK, Invoice.Gateway.INSURANCE}:
+        if invoice.status not in {Invoice.Status.PAID, Invoice.Status.VOID, Invoice.Status.REFUNDED} and invoice.gateway_ref and invoice.gateway not in {Invoice.Gateway.MOCK, Invoice.Gateway.CASH, Invoice.Gateway.BANK, Invoice.Gateway.WALLET, Invoice.Gateway.INSURANCE}:
             try:
                 gateway = get_gateway(invoice.gateway)
                 verification = gateway.verify(reference=invoice.gateway_ref, transaction_id=invoice.gateway_ref)
@@ -284,42 +495,19 @@ class MockWebhookView(APIView):
                 payment, receipt, invoice = confirm_invoice_payment(
                     invoice=invoice,
                     amount=invoice.balance,
-                    method=PaymentTransaction.Method.WALLET,
+                    method=PaymentTransaction.Method.MOBILE_MONEY,
                     reference=reference,
                 )
             except ValueError as exc:
                 return Response({"detail": str(exc)}, status=409)
 
-            appointment = invoice.appointment
-            if appointment is not None and appointment.status == appointment.Status.PENDING:
-                try:
-                    appointment.transition_to(
-                        appointment.Status.CONFIRMED,
-                        actor=None,
-                        reason="Payment verified",
-                        metadata={"invoice": invoice.number},
-                    )
-                except DjangoValidationError:
-                    pass
-
+            # Appointment/order/subscription transitions and provider
+            # notifications run inside confirm_invoice_payment's paid-source hook.
             _notify_payment(
                 invoice,
                 "Payment received",
                 f"Invoice {invoice.number} for {invoice.currency} {invoice.amount:,} has been paid. Receipt {receipt.number} is ready.",
             )
-            if appointment is not None:
-                try:
-                    from communication.services import notify
-
-                    notify(
-                        appointment.doctor,
-                        "Payment received",
-                        f"Invoice {invoice.number} for appointment #{appointment.id} has been paid.",
-                        kind="payment",
-                        action_url="/doctor/appointments",
-                    )
-                except Exception:
-                    pass
             _audit(request, "payment.confirmed", invoice, {"gateway": "mock"})
             _emit(
                 "payment.confirmed",
@@ -702,10 +890,21 @@ class WithdrawView(APIView):
             return Response({"detail": "amount must be an integer"}, status=400)
         if amount <= 0:
             return Response({"detail": "amount must be positive"}, status=400)
+        method = str(request.data.get("method") or Payout.Method.MOBILE_MONEY)
+        if method not in Payout.Method.values:
+            return Response({"detail": "method must be one of mobile_money, bank"}, status=400)
+        account_number = str(request.data.get("account_number", "")).strip()
         earnings = doctor_earnings(request.user)
         if amount > earnings["pending"]:
             return Response({"detail": "Amount exceeds pending earnings"}, status=400)
-        payout = Payout.objects.create(doctor=request.user, amount=amount, status="pending")
+        payout = Payout.objects.create(
+            doctor=request.user,
+            amount=amount,
+            status=Payout.Status.PENDING,
+            method=method,
+            account_number=account_number,
+            account_name=str(request.data.get("account_name", "")).strip(),
+        )
         try:
             from governance.services import audit
 
@@ -714,12 +913,183 @@ class WithdrawView(APIView):
                 action="payout.requested",
                 resource=payout,
                 purpose="payment",
-                metadata={"amount": amount},
+                metadata={"amount": amount, "method": method},
                 request=request,
             )
         except Exception:
             pass
         return Response(PayoutSerializer(payout).data, status=status.HTTP_201_CREATED)
+
+
+class AdminPayoutListView(APIView):
+    permission_classes = [IsRole]
+    allowed_roles = ["admin", "finance_manager"]
+
+    def get(self, request):
+        payouts = Payout.objects.select_related("doctor", "processed_by")
+        status_value = request.query_params.get("status")
+        if status_value:
+            payouts = payouts.filter(status=status_value)
+        return Response(PayoutSerializer(payouts, many=True).data)
+
+
+class AdminPayoutActionView(APIView):
+    permission_classes = [IsRole]
+    allowed_roles = ["admin", "finance_manager"]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        payout = Payout.objects.select_related("doctor").filter(pk=pk).first()
+        if payout is None:
+            return Response({"detail": "Payout not found."}, status=404)
+        action = request.data.get("action")
+        try:
+            payout = process_payout(
+                payout=payout,
+                action=action,
+                admin=request.user,
+                reference=str(request.data.get("reference", "")).strip(),
+                notes=str(request.data.get("notes", "")).strip(),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=409)
+        try:
+            from governance.services import audit
+
+            audit(
+                actor=request.user,
+                action=f"payout.{action}",
+                resource=payout,
+                purpose="payment",
+                metadata={"amount": payout.amount, "status": payout.status},
+                request=request,
+            )
+        except Exception:
+            pass
+        messages = {
+            "approve": ("Payout approved", f"Your payout of UGX {payout.amount:,} has been approved and will be disbursed shortly."),
+            "pay": ("Payout paid", f"Your payout of UGX {payout.amount:,} has been paid to {payout.account_number}."),
+            "reject": ("Payout rejected", f"Your payout of UGX {payout.amount:,} was rejected. {payout.notes}".strip()),
+        }
+        title, body = messages[action]
+        try:
+            from communication.services import notify
+
+            notify(payout.doctor, title, body, kind="payment", action_url="/doctor/earnings", priority="high")
+        except Exception:
+            pass
+        return Response(PayoutSerializer(payout).data)
+
+
+class WalletView(APIView):
+    permission_classes = [IsRole]
+    allowed_roles = ["patient"]
+
+    def get(self, request):
+        wallet = wallet_for(request.user)
+        transactions = wallet.transactions.select_related("invoice")[:50]
+        return Response(
+            {
+                "balance": wallet.balance,
+                "currency": "UGX",
+                "transactions": WalletTransactionSerializer(transactions, many=True).data,
+            }
+        )
+
+
+class WalletTopupView(APIView):
+    permission_classes = [IsRole]
+    allowed_roles = ["patient"]
+
+    @transaction.atomic
+    def post(self, request):
+        try:
+            amount = int(request.data.get("amount"))
+        except (TypeError, ValueError):
+            return Response({"detail": "amount must be an integer"}, status=400)
+        if amount <= 0:
+            return Response({"detail": "amount must be positive"}, status=400)
+        method = request.data.get("method")
+        phone = request.data.get("phone")
+        requested_gateway = str(request.data.get("gateway") or "").strip().lower()
+        gateway_by_method = {
+            "mobile_money": {"mtn_momo", "airtel_money", "flutterwave", "mock"},
+            "card": {"flutterwave", "paystack", "mock"},
+        }
+        if method not in gateway_by_method:
+            return Response({"detail": "method must be one of mobile_money, card"}, status=400)
+        default_gateway = Invoice.Gateway.MOCK if settings.MOCK_PAYMENTS else os.getenv("PAYMENT_GATEWAY", Invoice.Gateway.FLUTTERWAVE)
+        selected_gateway = requested_gateway or default_gateway
+        if selected_gateway not in gateway_by_method[method]:
+            return Response({"detail": f"Gateway {selected_gateway} is not available for {method}."}, status=400)
+        wallet = wallet_for(request.user)
+        invoice = Invoice.objects.create(
+            patient=request.user,
+            gateway=selected_gateway,
+            source_type=Invoice.SourceType.WALLET_TOPUP,
+            source_id=str(wallet.id),
+        )
+        _create_invoice_items(invoice, [{
+            "code": "WALLET-TOPUP",
+            "description": "Wallet top-up",
+            "quantity": 1,
+            "unit_price": amount,
+            "service_type": "wallet_topup",
+            "source_id": str(wallet.id),
+        }])
+        simulated = False
+        try:
+            result, simulated = _initiate_with_simulation_fallback(invoice, phone)
+        except Exception as exc:
+            return Response(
+                {"detail": f"{invoice.gateway} gateway could not be initialized: {exc}"}, status=503
+            )
+        invoice.gateway_ref = result["ref"]
+        invoice.save(update_fields=["gateway_ref", "updated_at"])
+        _audit(request, "wallet.topup.initiated", invoice, {"method": method, "amount": amount, "simulated": simulated})
+        _emit(
+            "wallet.topup.initiated",
+            invoice,
+            {
+                "invoice_number": invoice.number,
+                "amount": invoice.amount,
+                "currency": invoice.currency,
+                "gateway": invoice.gateway,
+                "method": method,
+            },
+            request,
+        )
+        return Response(
+            {
+                "invoice_number": invoice.number,
+                "amount": invoice.amount,
+                "ref": result["ref"],
+                "checkout_url": result.get("checkout_url", ""),
+                "instructions": result.get("instructions", ""),
+                "gateway": invoice.gateway,
+                "status": result.get("status", "initiated"),
+                "mock": invoice.gateway == Invoice.Gateway.MOCK,
+                "simulated": simulated,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CommissionRuleView(APIView):
+    permission_classes = [IsRole]
+    allowed_roles = ["admin"]
+
+    def get(self, request):
+        rules = CommissionRule.objects.select_related("doctor", "organization")
+        if request.query_params.get("active") is not None:
+            rules = rules.filter(active=request.query_params["active"].lower() in {"1", "true", "yes"})
+        return Response(CommissionRuleSerializer(rules, many=True).data)
+
+    def post(self, request):
+        serializer = CommissionRuleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        rule = serializer.save()
+        return Response(CommissionRuleSerializer(rule).data, status=status.HTTP_201_CREATED)
 
 
 class GatewayWebhookView(APIView):
@@ -923,13 +1293,13 @@ def _invoice_pdf(invoice, receipt=None):
         topMargin=16 * mm,
         bottomMargin=16 * mm,
         title=(receipt.number if receipt else invoice.number),
-        author="MyDoctor Platform",
+        author="HealthPilot Platform",
     )
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="RightSmall", parent=styles["BodyText"], alignment=TA_RIGHT, fontSize=8, textColor=colors.HexColor("#64748b")))
     styles.add(ParagraphStyle(name="DocTitle", parent=styles["Title"], fontSize=22, leading=26, textColor=colors.HexColor("#123b72"), spaceAfter=4))
     story = []
-    org_name = invoice.organization.legal_name if invoice.organization else "MyDoctor Platform"
+    org_name = invoice.organization.legal_name if invoice.organization else "HealthPilot Platform"
     doc_kind = "RECEIPT" if receipt else "INVOICE"
     doc_number = receipt.number if receipt else invoice.number
     story.append(Table([
@@ -996,7 +1366,7 @@ def _invoice_pdf(invoice, receipt=None):
         story.append(Spacer(1, 5 * mm))
         story.append(Paragraph(f"<b>Notes</b><br/>{safe(invoice.notes)}", styles["BodyText"]))
     story.append(Spacer(1, 10 * mm))
-    story.append(Paragraph("Generated securely by MyDoctor. Keep this document for your records. Verification and audit references are retained by the issuing organization.", styles["RightSmall"]))
+    story.append(Paragraph("Generated securely by HealthPilot. Keep this document for your records. Verification and audit references are retained by the issuing organization.", styles["RightSmall"]))
     doc.build(story)
     return buffer.getvalue()
 
@@ -1054,12 +1424,12 @@ class SendInvoiceView(APIView):
         try:
             pdf = _invoice_pdf(invoice)
             message = EmailMessage(
-                subject=f"Invoice {invoice.number} from {invoice.organization.legal_name if invoice.organization else 'MyDoctor'}",
+                subject=f"Invoice {invoice.number} from {invoice.organization.legal_name if invoice.organization else 'HealthPilot'}",
                 body=(
                     f"Hello {_display_name(invoice.patient)},\n\n"
                     f"Your invoice {invoice.number} for {invoice.currency} {invoice.amount:,} is attached. "
                     f"Current balance: {invoice.currency} {invoice.balance:,}.\n\n"
-                    "Sign in to MyDoctor to view payments, receipts and care information."
+                    "Sign in to HealthPilot to view payments, receipts and care information."
                 ),
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 to=[recipient],

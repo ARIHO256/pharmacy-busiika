@@ -181,7 +181,21 @@ class AppointmentListCreateView(APIView):
 
     def get(self, request):
         if request_role(request) in BOOKABLE_PROVIDER_ROLES:
-            qs = Appointment.objects.filter(doctor=request.user)
+            # Staff collaborate at the organization level: with an explicit
+            # scope=organization the provider sees colleagues' appointments too.
+            # Patient-side scoping below stays strictly confidential.
+            if request.query_params.get("scope") == "organization":
+                from workforce.access import organization_for_user
+
+                organization = organization_for_user(request.user, None)
+                if organization is not None:
+                    qs = Appointment.objects.filter(
+                        doctor__staff_memberships__organization=organization
+                    ).distinct()
+                else:
+                    qs = Appointment.objects.filter(doctor=request.user)
+            else:
+                qs = Appointment.objects.filter(doctor=request.user)
         else:
             requested_patient = request.query_params.get("patient_id")
             if requested_patient:
@@ -281,6 +295,19 @@ class AppointmentListCreateView(APIView):
                 f"Appointment #{appointment.id} was booked for {patient.display_name}.",
                 kind="appointment",
             )
+        _notify(
+            appointment.doctor,
+            "New appointment request",
+            f"{patient.display_name} booked an appointment on {appointment.date} at {appointment.start_time.strftime('%H:%M')} — review and confirm.",
+            kind="appointment",
+        )
+        if patient.id == request.user.id:
+            _notify(
+                patient,
+                "Appointment booked",
+                f"Your appointment with {doctor.display_name} is booked for {appointment.date} at {appointment.start_time.strftime('%H:%M')}. You will be notified once it is confirmed.",
+                kind="appointment",
+            )
         try:
             from interoperability.services import emit_event
 
@@ -302,6 +329,91 @@ class AppointmentListCreateView(APIView):
         except Exception:
             pass
         return Response(AppointmentSerializer(appointment).data, status=201)
+
+
+class AppointmentRescheduleView(APIView):
+    permission_classes = [IsRole]
+    allowed_roles = ["patient", *sorted(BOOKABLE_PROVIDER_ROLES)]
+    RESCHEDULABLE = {Appointment.Status.PENDING, Appointment.Status.CONFIRMED}
+
+    def post(self, request, pk):
+        appointment = get_object_or_404(Appointment, pk=pk)
+        is_doctor = appointment.doctor_id == request.user.id
+        is_patient = appointment.patient_id == request.user.id
+        is_authorized_caregiver = request_role(request) == User.Role.PATIENT and _can_manage_appointment(request.user, appointment)
+        if not (is_doctor or is_patient or is_authorized_caregiver):
+            return Response({"detail": "Only the patient, authorized caregiver or assigned professional can reschedule"}, status=403)
+        if appointment.status not in self.RESCHEDULABLE:
+            return Response({"detail": "Only pending or confirmed appointments can be rescheduled"}, status=409)
+        try:
+            date = datetime.date.fromisoformat(str(request.data.get("date", "")))
+        except ValueError:
+            return Response({"detail": "Invalid date, expected YYYY-MM-DD"}, status=400)
+        try:
+            parts = str(request.data.get("start_time", "")).split(":")
+            start_time = datetime.time(int(parts[0]), int(parts[1]))
+        except (ValueError, IndexError, TypeError):
+            return Response({"detail": "Invalid start_time, expected HH:MM"}, status=400)
+        if date == appointment.date and start_time == appointment.start_time:
+            return Response(AppointmentSerializer(appointment).data)
+        slot = find_slot(appointment.doctor, date, start_time)
+        if slot is None:
+            return Response({"detail": "Slot not available"}, status=400)
+        old_date, old_start = appointment.date, appointment.start_time
+        duration = datetime.datetime.combine(appointment.date, appointment.end_time) - datetime.datetime.combine(appointment.date, appointment.start_time)
+        appointment.date = date
+        appointment.start_time = start_time
+        # Rescheduling moves the booking; the original duration is preserved.
+        appointment.end_time = (datetime.datetime.combine(date, start_time) + duration).time()
+        try:
+            appointment.save(update_fields=["date", "start_time", "end_time", "updated_at"])
+        except IntegrityError:
+            return Response({"detail": "Slot not available"}, status=400)
+        reschedule_metadata = {
+            "from": {"date": old_date.isoformat(), "start_time": old_start.strftime("%H:%M")},
+            "to": {"date": date.isoformat(), "start_time": start_time.strftime("%H:%M")},
+        }
+        AppointmentStatusHistory.objects.create(
+            appointment=appointment,
+            actor=request.user,
+            from_status=appointment.status,
+            to_status=appointment.status,
+            reason="Appointment rescheduled",
+            metadata=reschedule_metadata,
+        )
+        counterpart = appointment.doctor if (is_patient or is_authorized_caregiver) else appointment.patient
+        _notify(
+            counterpart,
+            "Appointment rescheduled",
+            f"Appointment #{appointment.id} was moved to {appointment.date} at {appointment.start_time.strftime('%H:%M')}.",
+            kind="appointment",
+        )
+        _audit(
+            request,
+            "appointment.rescheduled",
+            appointment,
+            decision="allow",
+            metadata=reschedule_metadata,
+        )
+        try:
+            from interoperability.services import emit_event
+
+            emit_event(
+                "appointment.rescheduled",
+                appointment,
+                {
+                    "patient_id": appointment.patient_id,
+                    "doctor_id": appointment.doctor_id,
+                    "status": appointment.status,
+                    **reschedule_metadata,
+                },
+                actor=request.user,
+                patient=appointment.patient,
+                request=request,
+            )
+        except Exception:
+            pass
+        return Response(AppointmentSerializer(appointment).data)
 
 
 class AppointmentActionView(APIView):

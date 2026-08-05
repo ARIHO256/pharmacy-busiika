@@ -15,6 +15,7 @@ import WorkforceSchedule from '../operations/WorkforceSchedule'
 import Subscriptions from '../operations/Subscriptions'
 import SupportCentre from '../operations/SupportCentre'
 import NotificationConsole from '../operations/NotificationConsole'
+import TeamSchedule from '../staff/TeamSchedule'
 
 export const nav = [
   { to: '/pharmacy', label: 'Operations Home', icon: 'dashboard', end: true, group: 'Overview', description: 'Orders, stock alerts and fulfilment' },
@@ -34,6 +35,7 @@ export const nav = [
   { to: '/pharmacy/support', label: 'Support', icon: 'help', group: 'Settings', description: 'Platform support and issue tracking' },
   { to: '/pharmacy/profile', label: 'Pharmacy Profile', icon: 'settings', group: 'Settings', description: 'Branches, licences and service settings' },
 
+  { to: '/pharmacy/team-schedule', label: 'Team Schedule', icon: 'calendar', group: 'Professional tools', description: 'Upcoming appointments for every provider in your organization' },
   ...deepNav('pharmacy', 'pharmacy', { label: 'Complete page centre', group: 'Professional tools' }),
 ]
 
@@ -55,5 +57,6 @@ export const routes = [
   { path: 'support', element: <SupportCentre /> },
   { path: 'profile', element: <ProviderProfile /> },
 
+  { path: 'team-schedule', element: <TeamSchedule /> },
   ...deepRoutes('pharmacy', 'pharmacy', { title: 'Pharmacy organization page centre' }),
 ]

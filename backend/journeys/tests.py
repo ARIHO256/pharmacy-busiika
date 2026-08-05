@@ -23,7 +23,7 @@ class ActiveRoleAuthorizationTests(TestCase):
         self.context = RoleContext.objects.create(
             user=self.worker, role_code="records_officer", title="Medical records officer", is_primary=True
         )
-        ActiveRoleContext.objects.create(user=self.worker, context=self.context)
+        ActiveRoleContext.objects.update_or_create(user=self.worker, defaults={"context": self.context})
 
     def test_active_context_is_authoritative_over_registration_role(self):
         self.assertEqual(self.worker.role, "receptionist")
@@ -38,7 +38,7 @@ class ActiveRoleAuthorizationTests(TestCase):
         for index, role in enumerate(("it_support", "compliance_officer")):
             user = User.objects.create_user(email=f"{role}{index}@example.test", password="Pass!123456", role=role)
             context = RoleContext.objects.create(user=user, role_code=role, is_primary=True)
-            ActiveRoleContext.objects.create(user=user, context=context)
+            ActiveRoleContext.objects.update_or_create(user=user, defaults={"context": context})
             self.assertFalse(can_manage_platform(user), role)
 
 
@@ -51,7 +51,7 @@ class ControlledClinicalAccessTests(TestCase):
             email="admin.clinical@example.test", password="Pass!123456", role="admin", is_verified=True, mfa_enabled=True
         )
         context = RoleContext.objects.create(user=self.admin, role_code="platform_super_admin", is_primary=True)
-        ActiveRoleContext.objects.create(user=self.admin, context=context)
+        ActiveRoleContext.objects.update_or_create(user=self.admin, defaults={"context": context})
 
     def test_administrator_has_no_standing_clinical_access(self):
         allowed, emergency, reason = can_access_patient(self.admin, self.patient)
@@ -86,7 +86,7 @@ class JourneyApiBoundaryTests(TestCase):
             email="other.journey@example.test", password="Pass!123456", role="patient", is_verified=True
         )
         context = RoleContext.objects.create(user=self.patient, role_code="patient", is_primary=True)
-        ActiveRoleContext.objects.create(user=self.patient, context=context)
+        ActiveRoleContext.objects.update_or_create(user=self.patient, defaults={"context": context})
         self.client = APIClient()
         self.client.force_authenticate(self.patient)
 
@@ -142,7 +142,7 @@ class OperationalActionTests(TestCase):
             email="doctor.operations@example.test", password="Pass!123456", role="doctor", is_verified=True
         )
         context = RoleContext.objects.create(user=self.doctor, role_code="doctor", is_primary=True)
-        ActiveRoleContext.objects.create(user=self.doctor, context=context)
+        ActiveRoleContext.objects.update_or_create(user=self.doctor, defaults={"context": context})
         self.client = APIClient()
         self.client.force_authenticate(self.doctor)
 
@@ -197,7 +197,7 @@ class ReleaseAcceptanceTests(TestCase):
             email="release.admin@example.test", password="Pass!123456", role="admin", is_verified=True
         )
         context = RoleContext.objects.create(user=self.admin, role_code="platform_super_admin", is_primary=True)
-        ActiveRoleContext.objects.create(user=self.admin, context=context)
+        ActiveRoleContext.objects.update_or_create(user=self.admin, defaults={"context": context})
         self.client = APIClient()
         self.client.force_authenticate(self.admin)
 
@@ -238,7 +238,7 @@ class QualifiedReleaseReviewerTests(TestCase):
             email="qualified.doctor@example.test", password="Pass!123456", role="doctor", is_verified=True
         )
         context = RoleContext.objects.create(user=self.doctor, role_code="doctor", is_primary=True)
-        ActiveRoleContext.objects.create(user=self.doctor, context=context)
+        ActiveRoleContext.objects.update_or_create(user=self.doctor, defaults={"context": context})
         self.client = APIClient(); self.client.force_authenticate(self.doctor)
 
     def test_qualified_reviewer_can_view_release_gates(self):
@@ -282,7 +282,7 @@ class OrganizationIsolationTests(TestCase):
             context = RoleContext.objects.create(
                 user=user, organization=org, role_code="facility_manager", is_primary=True
             )
-            ActiveRoleContext.objects.create(user=user, context=context)
+            ActiveRoleContext.objects.update_or_create(user=user, defaults={"context": context})
 
     def test_operational_actions_are_isolated_by_active_organization(self):
         client_a = APIClient(); client_a.force_authenticate(self.manager_a)
@@ -315,7 +315,7 @@ class PrivilegedAccessExpiryTests(TestCase):
         patient = User.objects.create_user(email="expired.patient@example.test", password="Pass!123456", role="patient")
         admin = User.objects.create_user(email="expired.admin@example.test", password="Pass!123456", role="admin", mfa_enabled=True)
         context = RoleContext.objects.create(user=admin, role_code="platform_super_admin", is_primary=True)
-        ActiveRoleContext.objects.create(user=admin, context=context)
+        ActiveRoleContext.objects.update_or_create(user=admin, defaults={"context": context})
         reviewer = User.objects.create_user(email="expired.reviewer@example.test", password="Pass!123456", role="clinical_safety_admin")
         PrivilegedAccessGrant.objects.create(
             requester=admin, patient=patient, purpose="safety review",

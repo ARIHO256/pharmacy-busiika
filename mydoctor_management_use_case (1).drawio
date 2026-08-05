@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mxfile host="app.diagrams.net" modified="2026-08-05T12:15:00.000Z" agent="OpenAI GPT-5.6 Thinking" version="24.7.17" type="device" compressed="false">
+  <diagram id="mydoctor-use-case-v5" name="Management Studio Use Cases">
+    <mxGraphModel dx="1600" dy="950" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2800" pageHeight="1700" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="MyDoctor – Management Studio Use Case Diagram" style="text;html=1;align=center;verticalAlign=middle;fontStyle=1;fontSize=28;fontColor=#1F2937;" vertex="1" parent="1">
+          <mxGeometry x="640" y="20" width="1520" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="system" value="MyDoctor Management Studio" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#111827;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="220" y="90" width="2360" height="1550" as="geometry"/>
+        </mxCell>
+        <mxCell id="actor_admin" value="Administrators" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D9E8FF;strokeColor=#64748B;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="180" width="260" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="actor_clinical" value="Clinical &amp; Compliance" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E8FF;strokeColor=#64748B;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="360" width="260" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="actor_support" value="Support &amp; Communications" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE8EC;strokeColor=#64748B;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="540" width="260" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="actor_technical" value="Technical &amp; Integration" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAF4E2;strokeColor=#64748B;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="720" width="260" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="actor_audit" value="Audit &amp; Security" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAF2FF;strokeColor=#64748B;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="2440" y="180" width="260" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="panel_command" value="Command &amp; Dashboard" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontStyle=1;fontSize=16;spacingTop=10;strokeWidth=1.4;fillColor=#EAF2FF;strokeColor=#6B7280;fontColor=#111827;" vertex="1" parent="1">
+          <mxGeometry x="360" y="180" width="1040" height="380" as="geometry"/>
+        </mxCell>
+        <mxCell id="panel_work" value="Work &amp; Task Management" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontStyle=1;fontSize=16;spacingTop=10;strokeWidth=1.4;fillColor=#FFF4D6;strokeColor=#6B7280;fontColor=#111827;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="180" width="1040" height="380" as="geometry"/>
+        </mxCell>
+        <mxCell id="panel_access" value="User, Access &amp; Security" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontStyle=1;fontSize=16;spacingTop=10;strokeWidth=1.4;fillColor=#F3E8FF;strokeColor=#6B7280;fontColor=#111827;" vertex="1" parent="1">
+          <mxGeometry x="1640" y="180" width="1040" height="380" as="geometry"/>
+        </mxCell>
+        <mxCell id="panel_content" value="Content &amp; Communications" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontStyle=1;fontSize=16;spacingTop=10;strokeWidth=1.4;fillColor=#FCE8EC;strokeColor=#6B7280;fontColor=#111827;" vertex="1" parent="1">
+          <mxGeometry x="360" y="640" width="1040" height="380" as="geometry"/>
+        </mxCell>
+        <mxCell id="panel_change" value="Workflow, Change &amp; Audit" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontStyle=1;fontSize=16;spacingTop=10;strokeWidth=1.4;fillColor=#E3F6F8;strokeColor=#6B7280;fontColor=#111827;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="640" width="1040" height="380" as="geometry"/>
+        </mxCell>
+        <mxCell id="panel_reports" value="Reporting &amp; Integrations" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontStyle=1;fontSize=16;spacingTop=10;strokeWidth=1.4;fillColor=#EAF4E2;strokeColor=#6B7280;fontColor=#111827;" vertex="1" parent="1">
+          <mxGeometry x="1640" y="640" width="1040" height="380" as="geometry"/>
+        </mxCell>
+        <mxCell id="panel_data" value="Settings &amp; Data Management" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontStyle=1;fontSize=16;spacingTop=10;strokeWidth=1.4;fillColor=#EDF3FA;strokeColor=#6B7280;fontColor=#111827;" vertex="1" parent="1">
+          <mxGeometry x="360" y="1100" width="1040" height="380" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_dashboard" value="View Management Dashboard" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_command">
+          <mxGeometry x="40" y="70" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_alerts" value="Monitor Alerts &amp; System Health" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_command">
+          <mxGeometry x="40" y="170" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_kpis" value="Review KPIs &amp; Trends" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_command">
+          <mxGeometry x="40" y="270" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_work_list" value="View Work List &amp; Boards" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_work">
+          <mxGeometry x="40" y="70" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_assign" value="Assign / Reassign Tasks" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_work">
+          <mxGeometry x="40" y="170" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_progress" value="Track Task Status &amp; Progress" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_work">
+          <mxGeometry x="40" y="270" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_automation" value="Configure Automation Rules" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_work">
+          <mxGeometry x="40" y="370" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_user_manage" value="Manage Users, Roles &amp; Scopes" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_access">
+          <mxGeometry x="40" y="70" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_permissions" value="Configure Permissions &amp; Sessions" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_access">
+          <mxGeometry x="40" y="170" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_verify" value="Verify, Suspend &amp; Reactivate Users" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_access">
+          <mxGeometry x="40" y="270" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_content" value="Create / Edit Content &amp; Pages" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_content">
+          <mxGeometry x="40" y="70" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_media" value="Manage Media Library" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_content">
+          <mxGeometry x="40" y="170" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_broadcast" value="Create Communications &amp; Notices" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_content">
+          <mxGeometry x="40" y="270" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_workflow" value="Design / Validate Workflows" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_change">
+          <mxGeometry x="40" y="70" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_changes" value="Create / Approve Change Requests" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_change">
+          <mxGeometry x="40" y="170" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_audit" value="Review Audit Logs &amp; History" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_change">
+          <mxGeometry x="40" y="270" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_reports" value="Build &amp; Run Reports" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_reports">
+          <mxGeometry x="40" y="70" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_analytics" value="View Analytics &amp; Trends" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_reports">
+          <mxGeometry x="40" y="170" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_integrations" value="Manage Integrations &amp; Webhooks" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_reports">
+          <mxGeometry x="40" y="270" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_settings" value="Configure App &amp; Org Settings" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_data">
+          <mxGeometry x="40" y="70" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_flags" value="Manage Feature Flags" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_data">
+          <mxGeometry x="40" y="170" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_data" value="Manage Data Retention &amp; Archive" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_data">
+          <mxGeometry x="40" y="270" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_import_export" value="Import / Export Data" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=12;strokeWidth=1.2;fillColor=#FFFFFF;strokeColor=#334155;" vertex="1" parent="panel_data">
+          <mxGeometry x="40" y="370" width="860" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend" value="&lt;b&gt;Legend&lt;/b&gt;&lt;br&gt;&lt;br&gt;Actor groups are shown separately.&lt;br&gt;Modules group related use cases.&lt;br&gt;No connectors are shown to keep layout clean." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9CA3AF;fontSize=11;align=left;verticalAlign=top;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="1500" width="700" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="notes" value="&lt;b&gt;Design improvements&lt;/b&gt;&lt;br&gt;&lt;br&gt;• Removed crossing connectors completely.&lt;br&gt;• Central panels now contain all use cases by domain.&lt;br&gt;• Actors are grouped into five responsibility areas.&lt;br&gt;• This is a simplified, readable management studio map." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#FEF3C7;strokeColor=#D97706;fontSize=11;align=left;verticalAlign=top;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1780" y="1500" width="700" height="140" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

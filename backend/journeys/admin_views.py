@@ -368,8 +368,8 @@ class AdminSystemHealthView(APIView):
             checks["database_error"] = str(exc)
         try:
             marker = f"health-{timezone.now().timestamp()}"
-            cache.set("mydoctor-admin-health", marker, 20)
-            checks["cache"] = cache.get("mydoctor-admin-health") == marker
+            cache.set("healthpilot-admin-health", marker, 20)
+            checks["cache"] = cache.get("healthpilot-admin-health") == marker
         except Exception as exc:
             checks["cache"] = False
             checks["cache_error"] = str(exc)

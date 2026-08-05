@@ -121,9 +121,19 @@ export function ProviderProfile() {
     }
   }
 
+  if (!loading && !error && !data) {
+    return (
+      <Card title="Organization profile">
+        <p className="text-sm text-slate-500">No organization profile is attached to this account yet. Complete your organization registration first.</p>
+      </Card>
+    )
+  }
+
+  if (loading || !form) return <Spinner />
+  if (error) return <ErrorNote error={error} />
+
   return (
-    <LoadingOrError loading={loading || !form} error={error}>
-      <div className="max-w-2xl space-y-6">
+    <div className="max-w-2xl space-y-6">
         <Card
           title="Verification status"
           actions={<StatusBadge status={data?.status || 'pending'} />}
@@ -155,6 +165,5 @@ export function ProviderProfile() {
           </form>
         </Card>
       </div>
-    </LoadingOrError>
   )
 }

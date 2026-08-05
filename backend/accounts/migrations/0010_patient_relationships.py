@@ -1,4 +1,4 @@
-# Generated manually for the full-scale MyDoctor upgrade.
+# Generated manually for the full-scale HealthPilot upgrade.
 from django.conf import settings
 from django.db import migrations, models
 import django.db.models.deletion

@@ -27,7 +27,7 @@ class CapabilityStatementView(APIView):
                 "status": "active",
                 "kind": "instance",
                 "date": timezone.now().date().isoformat(),
-                "publisher": "MyDoctor Platform",
+                "publisher": "HealthPilot Platform",
                 "description": FHIR_FORMAT,
                 "fhirVersion": FHIR_VERSION,
                 "format": ["json"],

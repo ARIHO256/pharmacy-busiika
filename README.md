@@ -1,6 +1,6 @@
-# MyDoctor HealthOS
+# HealthPilot HealthOS
 
-MyDoctor is a multi-role telehealth and connected-care platform built with **Django REST Framework** and **React + Vite**. This enhanced edition keeps the original appointments, chat, prescriptions, pharmacy, laboratory, hospital, insurance, payment and administration flows, while adding the safety and governance foundations required for a serious health platform.
+HealthPilot is a multi-role telehealth and connected-care platform built with **Django REST Framework** and **React + Vite**. This enhanced edition keeps the original appointments, chat, prescriptions, pharmacy, laboratory, hospital, insurance, payment and administration flows, while adding the safety and governance foundations required for a serious health platform.
 
 > This repository is a production-oriented healthcare application baseline with complete role portals, database migrations, sample data, API workflows and deployment infrastructure. It is not a claim of regulatory certification; each deployment still requires local legal review, clinical validation, provider credentials and operational acceptance testing.
 
@@ -185,21 +185,21 @@ After `python seed.py`:
 
 | Role | Email | Password |
 |---|---|---|
-| Admin | `admin@mydoctor.test` | `AdminPass!2026` |
-| Patient | `patient1@mydoctor.test` | `DemoPass!2026` |
-| Doctor | `dr.nakato@mydoctor.test` | `DemoPass!2026` |
-| Nurse | `nurse@mydoctor.test` | `DemoPass!2026` |
-| Receptionist | `reception@mydoctor.test` | `DemoPass!2026` |
-| Records officer | `records@mydoctor.test` | `DemoPass!2026` |
-| Cashier | `cashier@mydoctor.test` | `DemoPass!2026` |
-| Facility manager | `manager@mydoctor.test` | `DemoPass!2026` |
-| Pharmacist | `pharmacist.staff@mydoctor.test` | `DemoPass!2026` |
-| Storekeeper | `storekeeper@mydoctor.test` | `DemoPass!2026` |
-| Laboratory professional | `labtech@mydoctor.test` | `DemoPass!2026` |
-| Pharmacy organization | `pharmacy@mydoctor.test` | `DemoPass!2026` |
-| Laboratory organization | `lab@mydoctor.test` | `DemoPass!2026` |
-| Hospital organization | `hospital@mydoctor.test` | `DemoPass!2026` |
-| Insurance organization | `insurance@mydoctor.test` | `DemoPass!2026` |
+| Admin | `admin@healthpilot.test` | `AdminPass!2026` |
+| Patient | `patient1@healthpilot.test` | `DemoPass!2026` |
+| Doctor | `dr.nakato@healthpilot.test` | `DemoPass!2026` |
+| Nurse | `nurse@healthpilot.test` | `DemoPass!2026` |
+| Receptionist | `reception@healthpilot.test` | `DemoPass!2026` |
+| Records officer | `records@healthpilot.test` | `DemoPass!2026` |
+| Cashier | `cashier@healthpilot.test` | `DemoPass!2026` |
+| Facility manager | `manager@healthpilot.test` | `DemoPass!2026` |
+| Pharmacist | `pharmacist.staff@healthpilot.test` | `DemoPass!2026` |
+| Storekeeper | `storekeeper@healthpilot.test` | `DemoPass!2026` |
+| Laboratory professional | `labtech@healthpilot.test` | `DemoPass!2026` |
+| Pharmacy organization | `pharmacy@healthpilot.test` | `DemoPass!2026` |
+| Laboratory organization | `lab@healthpilot.test` | `DemoPass!2026` |
+| Hospital organization | `hospital@healthpilot.test` | `DemoPass!2026` |
+| Insurance organization | `insurance@healthpilot.test` | `DemoPass!2026` |
 
 These credentials are for local demonstration only.
 

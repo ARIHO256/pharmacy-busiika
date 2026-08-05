@@ -1,4 +1,4 @@
-# MyDoctor HealthOS — 21-Section Implementation Status
+# HealthPilot HealthOS — 21-Section Implementation Status
 
 This document maps the twenty-one gaps identified during the enterprise audit to the implementation delivered in this release. “Implemented” means the repository contains database models, migrations, API endpoints, authorization rules, user-interface pages, seed coverage and deployment configuration for the capability. It does not mean that a third-party regulator, payment provider, SMS carrier, PACS vendor or government exchange has issued production credentials or certified the deployment.
 

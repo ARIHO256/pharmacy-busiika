@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from django.db import transaction
@@ -113,11 +114,63 @@ def err(message, code=drf_status.HTTP_400_BAD_REQUEST):
     return Response({"detail": message}, status=code)
 
 
+def _advance_visit(patient, to_status, actor, reason=""):
+    """Advance the patient's active outpatient visit after a cross-app event
+    (lab order, result release, dispensing, payment). Never raises."""
+    try:
+        from workforce.services import advance_active_visit
+
+        advance_active_visit(patient, to_status, actor=actor, reason=reason)
+    except Exception:
+        pass
+
+
+def _consume_inventory_for_sale(medicine, qty, order, actor):
+    """Mirror a store sale into operations inventory (see _consume_batches)."""
+    if not medicine.inventory_item_id:
+        return
+    _consume_batches(medicine, qty, actor, f"Online store order #{order.id}", f"store-order-{order.id}")
+
+
+def _consume_batches(medicine, qty, actor, reason, reference):
+    """Consume operations-inventory batches first-expiry-first-out and leave a
+    dispense movement per batch. The StockMovement post_save signal realigns
+    ``Medicine.stock`` to the item total, so staff stock pages and the public
+    store always show the same on-hand quantity.
+    """
+    from operations.models import StockMovement
+
+    remaining = qty
+    batches = (
+        medicine.inventory_item.batches.filter(quantity_available__gt=0, recalled=False)
+        .order_by("expiry_date", "received_at")
+        .select_for_update()
+    )
+    for batch in batches:
+        if remaining <= 0:
+            break
+        take = min(batch.quantity_available, remaining)
+        batch.quantity_available -= take
+        batch.save(update_fields=["quantity_available"])
+        StockMovement.objects.create(
+            batch=batch,
+            movement_type=StockMovement.Type.DISPENSE,
+            quantity=-take,
+            balance_after=batch.quantity_available,
+            reason=reason,
+            reference=reference,
+            created_by=actor,
+        )
+        remaining -= take
+
+
 def verified_provider_directory(role):
-    """Return [{id, org_name, address}] for verified providers of `role`.
+    """Return [{id, org_name, address, district}] for verified providers of `role`.
 
     ProviderProfile lives in accounts (built in parallel) — import lazily and
-    fall back to is_verified users when the model is unavailable.
+    fall back to is_verified users when the model is unavailable. ``district``
+    is an internal filter field only; ProviderDirectorySerializer does not
+    expose it.
     """
     try:
         from accounts.models import ProviderProfile
@@ -133,22 +186,36 @@ def verified_provider_directory(role):
             )
             for p in profiles:
                 name = p.org_name or f"{p.user.first_name} {p.user.last_name}".strip() or p.user.email
-                rows.append({"id": p.user_id, "org_name": name, "address": p.address})
+                rows.append({"id": p.user_id, "org_name": name, "address": p.address, "district": p.district})
             return rows
         except Exception:
             pass
     for u in User.objects.filter(role=role, is_verified=True):
         name = f"{u.first_name} {u.last_name}".strip() or u.email
-        rows.append({"id": u.id, "org_name": name, "address": ""})
+        rows.append({"id": u.id, "org_name": name, "address": "", "district": ""})
     return rows
 
 
 class ProviderDirectoryView(APIView):
+    """Public provider directory with optional search/location filters."""
+
     permission_classes = [AllowAny]
     role = None
 
     def get(self, request):
         data = verified_provider_directory(self.role)
+        search = str(request.query_params.get("search", "")).strip().lower()
+        if search:
+            data = [
+                row for row in data
+                if search in row["org_name"].lower() or search in row["address"].lower()
+            ]
+        location = str(request.query_params.get("location", "")).strip().lower()
+        if location:
+            data = [
+                row for row in data
+                if location in row["address"].lower() or location in row["district"].lower()
+            ]
         return Response(ProviderDirectorySerializer(data, many=True).data)
 
 
@@ -294,6 +361,7 @@ class CheckoutView(APIView):
     permission_classes = [IsRole]
     allowed_roles = [User.Role.PATIENT]
 
+    @transaction.atomic
     def post(self, request):
         delivery = bool(request.data.get("delivery", False))
         address = request.data.get("address", "") or ""
@@ -308,13 +376,15 @@ class CheckoutView(APIView):
             groups.setdefault(item.medicine.pharmacy_id, []).append(item)
 
         orders = []
+        delivery_fee = int(getattr(settings, "PHARMACY_DELIVERY_FEE", 0) or 0) if delivery else 0
         for pharmacy_id, items in groups.items():
-            total = sum(i.medicine.price * i.qty for i in items)
+            total = sum(i.medicine.price * i.qty for i in items) + delivery_fee
             order = Order.objects.create(
                 patient=request.user,
                 pharmacy_id=pharmacy_id,
                 total=total,
                 delivery=delivery,
+                delivery_fee=delivery_fee,
                 address=address,
             )
             for i in items:
@@ -327,6 +397,26 @@ class CheckoutView(APIView):
                 )
                 i.medicine.stock = max(0, i.medicine.stock - i.qty)
                 i.medicine.save(update_fields=["stock"])
+                _consume_inventory_for_sale(i.medicine, i.qty, order, request.user)
+            try:
+                from communication.services import notify
+
+                notify(
+                    order.pharmacy,
+                    "New store order",
+                    f"Order #{order.id} for UGX {order.total:,} was placed by {request.user.display_name} — confirm and prepare.",
+                    kind="pharmacy",
+                    action_url="/pharmacy/orders",
+                )
+                notify(
+                    request.user,
+                    "Order placed",
+                    f"Your order #{order.id} for UGX {order.total:,} has been received. The pharmacy will confirm it shortly.",
+                    kind="pharmacy",
+                    action_url="/patient/store",
+                )
+            except Exception:
+                pass
             orders.append(order)
 
         CartItem.objects.filter(patient=request.user).delete()
@@ -355,7 +445,7 @@ class OrderListView(APIView):
 class OrderUpdateView(APIView):
     permission_classes = [IsRole]
     allowed_roles = [User.Role.PHARMACY, User.Role.PHARMACIST, User.Role.FACILITY_MANAGER, User.Role.STOREKEEPER]
-    ALLOWED = {Order.Status.CONFIRMED, Order.Status.DELIVERED, Order.Status.CANCELLED}
+    ALLOWED = {Order.Status.CONFIRMED, Order.Status.OUT_FOR_DELIVERY, Order.Status.DELIVERED, Order.Status.CANCELLED}
 
     def post(self, request, pk):
         pharmacy_account, denied = require_provider_account(request, User.Role.PHARMACY)
@@ -366,9 +456,21 @@ class OrderUpdateView(APIView):
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
         new_status = request.data.get("status")
         if new_status not in self.ALLOWED:
-            return err("status must be one of confirmed|delivered|cancelled.")
+            return err("status must be one of confirmed|out_for_delivery|delivered|cancelled.")
         order.status = new_status
         order.save(update_fields=["status"])
+        try:
+            from communication.services import notify
+
+            notify(
+                order.patient,
+                f"Order #{order.id} {order.get_status_display().lower()}",
+                f"Your pharmacy order of UGX {order.total:,} is now {order.get_status_display().lower()}.",
+                kind="pharmacy",
+                action_url="/patient/store",
+            )
+        except Exception:
+            pass
         return Response(OrderSerializer(order, context={"request": request}).data)
 
 
@@ -467,6 +569,14 @@ class DispensingRecordListCreateView(APIView):
                         return err(f"Insufficient stock for {medicine.name}.")
                     medicine.stock -= dispensed
                     medicine.save(update_fields=["stock"])
+                    if medicine.inventory_item_id:
+                        _consume_batches(
+                            medicine,
+                            dispensed,
+                            request.user,
+                            f"Prescription dispensing, pharmacy order #{order.id}",
+                            f"pharmacy-order-{order.id}",
+                        )
 
         record = DispensingRecord.objects.create(
             pharmacy_order=order,
@@ -510,6 +620,8 @@ class DispensingRecordListCreateView(APIView):
         elif status_value == DispensingRecord.Status.REVIEWED:
             order.status = PharmacyOrder.Status.PREPARED
         order.save(update_fields=["status"])
+        if status_value in {DispensingRecord.Status.DISPENSED, DispensingRecord.Status.PARTIAL}:
+            _advance_visit(order.patient, "billing", request.user, f"Prescription {record.get_status_display().lower()} at pharmacy")
         try:
             from communication.services import notify
             notify(
@@ -690,12 +802,18 @@ class LabTestPanelOrderView(APIView):
             "priority": request.data.get("priority") or LabOrder.Priority.ROUTINE,
         }
         orders = [LabOrder.objects.create(test=item.test, specimen_type=item.test.sample_type, **common) for item in panel.items.all()]
+        _advance_visit(patient, "laboratory", request.user, f"Laboratory panel {panel.name} ordered")
         try:
             from communication.services import notify
             notify(
                 patient, "Laboratory panel ordered",
                 f"{panel.name} ({len(orders)} tests) has been ordered at {panel.lab.display_name}.",
                 kind="laboratory", action_url="/patient/health-record",
+            )
+            notify(
+                panel.lab, "New laboratory panel order",
+                f"{panel.name} ({len(orders)} tests) for {patient.display_name}.",
+                kind="laboratory", action_url="/lab/orders",
             )
         except Exception:
             pass
@@ -879,7 +997,11 @@ class LabOrderListCreateView(APIView):
             priority=request.data.get("priority") or LabOrder.Priority.ROUTINE,
             specimen_type=str(request.data.get("specimen_type", "")).strip() or test.sample_type,
             prescription_id=request.data.get("prescription_id") or None,
+            # Priced tests are collected only after the patient pays (see
+            # payments.InitiatePaymentView); free tests proceed directly.
+            status=LabOrder.Status.AWAITING_PAYMENT if test.price > 0 else LabOrder.Status.BOOKED,
         )
+        _advance_visit(patient, "laboratory", request.user, f"Laboratory test {test.name} ordered")
         try:
             from communication.services import notify
             notify(
@@ -888,6 +1010,14 @@ class LabOrderListCreateView(APIView):
                 f"{test.name} has been ordered at {lab.display_name}.",
                 kind="laboratory",
                 action_url="/patient/health-record",
+            )
+            notify(
+                lab,
+                "New laboratory order",
+                f"{test.name} for {patient.display_name} — {order.get_priority_display()} priority.",
+                kind="laboratory",
+                action_url="/lab/orders",
+                priority="high" if order.priority == LabOrder.Priority.URGENT else "normal",
             )
         except Exception:
             pass
@@ -954,6 +1084,7 @@ class LabOrderUpdateView(APIView):
         if changed:
             order.save(update_fields=list(dict.fromkeys(changed + ["updated_at"])))
         if order.result_released:
+            _advance_visit(order.patient, "waiting_clinician", request.user, f"Laboratory result released for {order.test.name}")
             try:
                 from communication.services import notify
                 notify(
@@ -964,6 +1095,15 @@ class LabOrderUpdateView(APIView):
                     action_url="/patient/health-record",
                     priority="high" if order.results.filter(interpretation="critical").exists() else "normal",
                 )
+                if order.referring_doctor_id:
+                    notify(
+                        order.referring_doctor,
+                        "Referred laboratory result available",
+                        f"{order.test.name} result for {order.patient.display_name} has been released.",
+                        kind="laboratory",
+                        action_url="/doctor/lab-referrals",
+                        priority="high" if order.results.filter(interpretation="critical").exists() else "normal",
+                    )
             except Exception:
                 pass
         return Response(LabOrderSerializer(order, context={"request": request}).data)
@@ -1049,7 +1189,7 @@ class LabResultListCreateView(APIView):
             order.save(update_fields=["status", "updated_at"])
         try:
             from communication.services import notify
-            body = "A laboratory result is ready. Please open MyDoctor to review it securely."
+            body = "A laboratory result is ready. Please open HealthPilot to review it securely."
             if result.interpretation == LabResult.Interpretation.CRITICAL:
                 body = "A critical laboratory result requires prompt clinical review. Contact your care team."
             if release:
@@ -1236,6 +1376,19 @@ class HospitalBookingListCreateView(APIView):
         booking = HospitalBooking.objects.create(
             patient=request.user, hospital=hospital, service=service, date=date
         )
+        try:
+            from communication.services import notify
+
+            service_label = f" for {service.name}" if service else ""
+            notify(
+                hospital,
+                "New service booking",
+                f"{request.user.display_name} booked{service_label} on {date}.",
+                kind="hospital",
+                action_url="/hospital/bookings",
+            )
+        except Exception:
+            pass
         return Response(
             HospitalBookingSerializer(booking).data, status=drf_status.HTTP_201_CREATED
         )

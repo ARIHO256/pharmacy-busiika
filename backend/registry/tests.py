@@ -93,8 +93,8 @@ class ProtectedRegistryDocumentsTests(APITestCase):
         from django.test import override_settings
         from django.core.files.uploadedfile import SimpleUploadedFile
 
-        self._media_root = tempfile.mkdtemp(prefix="mydoctor-registry-tests-")
-        self._settings = override_settings(MEDIA_ROOT=self._media_root, DEBUG=True)
+        self._media_root = tempfile.mkdtemp(prefix="healthpilot-registry-tests-")
+        self._settings = override_settings(MEDIA_ROOT=self._media_root)
         self._settings.enable()
         self.addCleanup(self._settings.disable)
         self.addCleanup(shutil.rmtree, self._media_root, True)
@@ -138,6 +138,8 @@ class ProtectedRegistryDocumentsTests(APITestCase):
         )
 
     def test_credential_document_is_owner_or_admin_only(self):
+        from django.urls import Resolver404, resolve
+
         url = f"/api/registry/credentials/{self.credential.id}/document/"
 
         self.client.force_authenticate(self.doctor)
@@ -149,11 +151,14 @@ class ProtectedRegistryDocumentsTests(APITestCase):
         self.client.force_authenticate(self.other_doctor)
         self.assertEqual(self.client.get(url).status_code, 403)
 
-        self.client.force_authenticate(None)
-        direct_media = self.client.get(f"/media/{self.credential.document.name}")
-        self.assertEqual(direct_media.status_code, 404)
+        # Media files are never routed directly; only the permission-checked
+        # endpoint above can stream them.
+        with self.assertRaises(Resolver404):
+            resolve(f"/media/{self.credential.document.name}")
 
     def test_organization_document_is_owner_or_admin_only(self):
+        from django.urls import Resolver404, resolve
+
         url = f"/api/registry/organizations/{self.organization.public_id}/license-document/"
 
         self.client.force_authenticate(self.owner)
@@ -168,9 +173,10 @@ class ProtectedRegistryDocumentsTests(APITestCase):
         self.client.force_authenticate(unrelated)
         self.assertEqual(self.client.get(url).status_code, 403)
 
-        self.client.force_authenticate(None)
-        direct_media = self.client.get(f"/media/{self.organization.license_document.name}")
-        self.assertEqual(direct_media.status_code, 404)
+        # Media files are never routed directly; only the permission-checked
+        # endpoint above can stream them.
+        with self.assertRaises(Resolver404):
+            resolve(f"/media/{self.organization.license_document.name}")
 
     def test_suspension_and_reactivation_update_owner_access(self):
         self.owner.is_verified = True

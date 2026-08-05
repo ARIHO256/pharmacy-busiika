@@ -74,7 +74,7 @@ def _appointment(row):
         "status": row.status,
         "status_label": row.get_status_display(),
         "reason": row.reason,
-        "meeting_link": row.meeting_link,
+        "meeting_link": getattr(row, "meeting_link", ""),
     }
 
 
@@ -414,10 +414,34 @@ def reception_data(request, slug):
         qs = QueueTicket.objects.select_related("patient", "appointment", "department")
         if org:
             qs = qs.filter(organization=org)
-        return {"kind": "queue", "records": [{"id": row.id, "number": row.number, "patient": _user(row.patient),
-                                                 "appointment": row.appointment_id, "department": getattr(row.department, "name", None),
-                                                 "status": row.status, "counter": row.counter,
-                                                 "issued_at": _iso(row.issued_at), "called_at": _iso(row.called_at)} for row in qs[:300]]}
+        records = [{"id": row.id, "number": row.number, "patient": _user(row.patient),
+                    "appointment": row.appointment_id, "department": getattr(row.department, "name", None),
+                    "status": row.status, "counter": row.counter,
+                    "issued_at": _iso(row.issued_at), "called_at": _iso(row.called_at)} for row in qs[:300]]
+        if slug == "patient-arrival-board":
+            # The live arrival queue is the PatientVisit engine; QueueTicket is
+            # a separate counter system. Show today's visits so reception sees
+            # and advances real arrivals.
+            from workforce.models import PatientVisit
+
+            visits = PatientVisit.objects.select_related("patient").filter(checked_in_at__date=timezone.localdate())
+            if org:
+                visits = visits.filter(organization=org)
+            records += [
+                {
+                    "id": row.id,
+                    "visit_number": row.visit_number,
+                    "queue_number": row.queue_number,
+                    "patient_name": row.patient.display_name,
+                    "reason": row.reason,
+                    "status": row.status,
+                    "priority": row.priority,
+                    "checked_in_at": _iso(row.checked_in_at),
+                    "_dataset": "visits",
+                }
+                for row in visits.order_by("queue_number")[:300]
+            ]
+        return {"kind": "queue", "records": records}
     if slug in {"duplicate-warning"}:
         qs = DuplicatePatientCandidate.objects.select_related("patient_a__patient", "patient_b__patient").filter(status="pending")
         if org and hasattr(DuplicatePatientCandidate, "organization"):

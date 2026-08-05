@@ -340,6 +340,7 @@ class Migration(migrations.Migration):
                 ('public_id', models.UUIDField(default=uuid.uuid4, editable=False, unique=True)),
                 ('appointment', models.OneToOneField('appointments.appointment', null=True, blank=True, on_delete=models.SET_NULL, related_name='enterprise_telemedicine_session')),
                 ('provider', models.CharField(max_length=24, default='jitsi')),
+                ('mode', models.CharField(max_length=12, choices=[('video', 'Video'), ('audio', 'Audio')], default='video')),
                 ('external_id', models.CharField(max_length=180, blank=True, default='')),
                 ('join_url', models.URLField(blank=True, default='')),
                 ('host_url', models.URLField(blank=True, default='')),

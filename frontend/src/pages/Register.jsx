@@ -54,7 +54,7 @@ export default function Register() {
   return (
     <main className="healthos-auth-shell register-mode">
       <section className="healthos-auth-story">
-        <Link to="/" className="healthos-auth-brand"><span><HealthIcon name="heart" size={19}/></span><div><strong>MyDoctor</strong><small>Connected Healthcare OS</small></div></Link>
+        <Link to="/" className="healthos-auth-brand"><span><HealthIcon name="heart" size={19}/></span><div><strong>HealthPilot</strong><small>Connected Healthcare OS</small></div></Link>
         <div className="healthos-auth-copy">
           <span className="healthos-auth-kicker">JOIN THE HEALTH NETWORK</span>
           <h1>One registration flow.<br/><em>The correct workspace for every role.</em></h1>

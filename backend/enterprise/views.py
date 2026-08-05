@@ -749,9 +749,9 @@ class EnterpriseMetricsView(APIView):
             return Response({"detail": "Invalid metrics token."}, status=status.HTTP_403_FORBIDDEN)
         from .services import platform_metrics
         metrics = platform_metrics()
-        lines = ["# HELP mydoctor_platform_info MyDoctor platform operational counters", "# TYPE mydoctor_platform_info gauge"]
+        lines = ["# HELP healthpilot_platform_info HealthPilot platform operational counters", "# TYPE healthpilot_platform_info gauge"]
         for name, value in metrics.items():
-            lines.append(f"mydoctor_{name} {int(value)}")
+            lines.append(f"healthpilot_{name} {int(value)}")
         lines.append("")
         return HttpResponse("\n".join(lines), content_type="text/plain; version=0.0.4")
 

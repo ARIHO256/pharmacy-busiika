@@ -6,3 +6,9 @@ from django.core.management import call_command
 def dispatch_notification_deliveries(self, limit=200):
     call_command("dispatch_notifications", limit=limit, max_attempts=5)
     return {"processed_limit": limit}
+
+
+@shared_task
+def send_weekly_health_digest(role="patient"):
+    call_command("send_health_digest", role=role)
+    return {"role": role}

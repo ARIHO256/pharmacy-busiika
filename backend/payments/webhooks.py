@@ -27,7 +27,7 @@ def verify_signature(gateway, raw_body, headers):
         expected = base64.b64encode(hmac.new(secret.encode(), raw_body, hashlib.sha256).digest()).decode() if secret else ""
     elif gateway in {"mtn_momo", "airtel_money"}:
         secret = os.getenv(f"{gateway.upper()}_WEBHOOK_SECRET", "")
-        supplied = headers.get("x-mydoctor-signature", "") or headers.get("x-signature", "")
+        supplied = headers.get("x-healthpilot-signature", "") or headers.get("x-signature", "")
         expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest() if secret else ""
     else:
         raise InvalidWebhook("Unsupported gateway.")

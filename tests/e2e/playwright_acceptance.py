@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Browser acceptance suite for MyDoctor.
+"""Browser acceptance suite for HealthPilot.
 
 Run against a seeded stack:
   python -m pip install -r tests/e2e/requirements.txt
@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Iterable
@@ -34,62 +35,62 @@ class Actor:
 
 
 ACTORS = (
-    Actor("patient", "patient1@mydoctor.test", "/patient", ("/patient/appointments", "/patient/health-record", "/patient/invoices", "/patient/dependents")),
-    Actor("doctor", "dr.nakato@mydoctor.test", "/doctor", ("/doctor/appointments", "/doctor/clinical", "/doctor/lab-referrals", "/doctor/prescriptions", "/release-acceptance")),
-    Actor("nurse", "nurse@mydoctor.test", "/nurse", ("/nurse/inpatients", "/nurse/triage", "/nurse/medications", "/nurse/advanced-inpatient", "/release-acceptance")),
-    Actor("midwife", "midwife@mydoctor.test", "/midwife", ("/midwife/antenatal-dashboard", "/midwife/visual-partograph", "/midwife/newborn-assessment")),
-    Actor("receptionist", "reception@mydoctor.test", "/reception", ("/reception/appointment-calendar", "/reception/provider-schedules", "/reception/patient-arrival-board")),
-    Actor("records_officer", "records@mydoctor.test", "/records", ("/records/master-patient-index", "/records/merge-wizard", "/records/record-release", "/release-acceptance")),
-    Actor("cashier", "cashier@mydoctor.test", "/cashier", ("/cashier/patient-account", "/cashier/split-payment", "/cashier/receipt-history")),
-    Actor("accountant", "accountant@mydoctor.test", "/accounting", ("/accounting/general-ledger", "/accounting/trial-balance", "/accounting/income-statement", "/release-acceptance")),
-    Actor("pharmacist", "pharmacist.staff@mydoctor.test", "/pharmacist", ("/pharmacist/prescription-workspace", "/pharmacist/controlled-drug-register", "/pharmacist/stock-count", "/release-acceptance")),
-    Actor("lab_technician", "labtech@mydoctor.test", "/lab-staff", ("/lab-staff/collection-worklist", "/lab-staff/result-entry", "/lab-staff/validation-queue", "/release-acceptance")),
-    Actor("radiologist", "radiologist@mydoctor.test", "/radiology", ("/radiology/modality-worklist", "/radiology/reporting-editor", "/radiology/pacs-viewer")),
-    Actor("paramedic", "paramedic@mydoctor.test", "/paramedic", ("/paramedic/trauma-chart", "/paramedic/resuscitation-timeline", "/paramedic/offline-paramedic")),
-    Actor("anaesthetist", "anaesthetist@mydoctor.test", "/anaesthesia", ("/anaesthesia/pre-anaesthetic", "/anaesthesia/anaesthesia-chart", "/anaesthesia/recovery-observation")),
-    Actor("facility_manager", "manager@mydoctor.test", "/facility", ("/facility/multi-branch-dashboard", "/facility/staff-onboarding", "/facility/visual-bed-map")),
-    Actor("insurance_officer", "insurance.officer@mydoctor.test", "/insurance-officer", ("/insurance-officer/eligibility-detail", "/insurance-officer/preauthorization-workbench", "/insurance-officer/claim-detail")),
+    Actor("patient", "patient1@healthpilot.test", "/patient", ("/patient/appointments", "/patient/health-record", "/patient/invoices", "/patient/dependents")),
+    Actor("doctor", "dr.nakato@healthpilot.test", "/doctor", ("/doctor/appointments", "/doctor/clinical", "/doctor/lab-referrals", "/doctor/prescriptions", "/release-acceptance")),
+    Actor("nurse", "nurse@healthpilot.test", "/nurse", ("/nurse/inpatients", "/nurse/triage", "/nurse/medications", "/nurse/advanced-inpatient", "/release-acceptance")),
+    Actor("midwife", "midwife@healthpilot.test", "/midwife", ("/midwife/antenatal-dashboard", "/midwife/visual-partograph", "/midwife/newborn-assessment")),
+    Actor("receptionist", "reception@healthpilot.test", "/reception", ("/reception/appointment-calendar", "/reception/provider-schedules", "/reception/patient-arrival-board")),
+    Actor("records_officer", "records@healthpilot.test", "/records", ("/records/master-patient-index", "/records/merge-wizard", "/records/record-release", "/release-acceptance")),
+    Actor("cashier", "cashier@healthpilot.test", "/cashier", ("/cashier/patient-account", "/cashier/split-payment", "/cashier/receipt-history")),
+    Actor("accountant", "accountant@healthpilot.test", "/accounting", ("/accounting/general-ledger", "/accounting/trial-balance", "/accounting/income-statement", "/release-acceptance")),
+    Actor("pharmacist", "pharmacist.staff@healthpilot.test", "/pharmacist", ("/pharmacist/prescription-workspace", "/pharmacist/controlled-drug-register", "/pharmacist/stock-count", "/release-acceptance")),
+    Actor("lab_technician", "labtech@healthpilot.test", "/lab-staff", ("/lab-staff/collection-worklist", "/lab-staff/result-entry", "/lab-staff/validation-queue", "/release-acceptance")),
+    Actor("radiologist", "radiologist@healthpilot.test", "/radiology", ("/radiology/modality-worklist", "/radiology/reporting-editor", "/radiology/pacs-viewer")),
+    Actor("paramedic", "paramedic@healthpilot.test", "/paramedic", ("/paramedic/trauma-chart", "/paramedic/resuscitation-timeline", "/paramedic/offline-paramedic")),
+    Actor("anaesthetist", "anaesthetist@healthpilot.test", "/anaesthesia", ("/anaesthesia/pre-anaesthetic", "/anaesthesia/anaesthesia-chart", "/anaesthesia/recovery-observation")),
+    Actor("facility_manager", "manager@healthpilot.test", "/facility", ("/facility/multi-branch-dashboard", "/facility/staff-onboarding", "/facility/visual-bed-map")),
+    Actor("insurance_officer", "insurance.officer@healthpilot.test", "/insurance-officer", ("/insurance-officer/eligibility-detail", "/insurance-officer/preauthorization-workbench", "/insurance-officer/claim-detail")),
 )
 
-ADMIN = Actor("admin", "admin@mydoctor.test", "/admin", ("/admin/user-detail", "/admin/role-matrix", "/admin/verification-case", "/admin/backup-restore", "/admin/release-acceptance"), "AdminPass!2026")
+ADMIN = Actor("admin", "admin@healthpilot.test", "/admin", ("/admin/user-detail", "/admin/role-matrix", "/admin/verification-case", "/admin/backup-restore", "/admin/release-acceptance"), "AdminPass!2026")
 VIEWPORTS = (("desktop", {"width": 1440, "height": 1000}), ("tablet", {"width": 834, "height": 1112}), ("mobile", {"width": 390, "height": 844}))
 ALL_ROLE_ACTORS = (
-    Actor("patient", "patient1@mydoctor.test", "/patient", ()),
-    Actor("doctor", "dr.nakato@mydoctor.test", "/doctor", ()),
-    Actor("clinical_officer", "clinical.officer@mydoctor.test", "/clinical-officer", ()),
-    Actor("dentist", "dentist@mydoctor.test", "/dentist", ()),
-    Actor("physiotherapist", "physio@mydoctor.test", "/physiotherapy", ()),
-    Actor("nutritionist", "nutrition@mydoctor.test", "/nutrition", ()),
-    Actor("psychologist", "psychology@mydoctor.test", "/psychology", ()),
-    Actor("medical_director", "medical.director@mydoctor.test", "/medical-director", ()),
-    Actor("nurse", "nurse@mydoctor.test", "/nurse", ()),
-    Actor("midwife", "midwife@mydoctor.test", "/midwife", ()),
-    Actor("theatre_nurse", "theatre.nurse@mydoctor.test", "/theatre-nurse", ()),
-    Actor("receptionist", "reception@mydoctor.test", "/reception", ()),
-    Actor("records_officer", "records@mydoctor.test", "/records", ()),
-    Actor("cashier", "cashier@mydoctor.test", "/cashier", ()),
-    Actor("accountant", "accountant@mydoctor.test", "/accounting", ()),
-    Actor("pharmacist", "pharmacist.staff@mydoctor.test", "/pharmacist", ()),
-    Actor("lab_technician", "labtech@mydoctor.test", "/lab-staff", ()),
-    Actor("radiologist", "radiologist@mydoctor.test", "/radiology", ()),
-    Actor("radiographer", "radiographer@mydoctor.test", "/radiography", ()),
-    Actor("anaesthetist", "anaesthetist@mydoctor.test", "/anaesthesia", ()),
-    Actor("facility_manager", "manager@mydoctor.test", "/facility", ()),
-    Actor("finance_manager", "finance.manager@mydoctor.test", "/finance", ()),
-    Actor("procurement_officer", "procurement@mydoctor.test", "/procurement", ()),
-    Actor("quality_officer", "quality@mydoctor.test", "/quality", ()),
-    Actor("compliance_officer", "compliance@mydoctor.test", "/compliance", ()),
-    Actor("hr_officer", "hr@mydoctor.test", "/hr", ()),
-    Actor("it_support", "it@mydoctor.test", "/it-operations", ()),
-    Actor("ambulance_dispatcher", "dispatcher@mydoctor.test", "/dispatch", ()),
-    Actor("paramedic", "paramedic@mydoctor.test", "/paramedic", ()),
-    Actor("insurance_officer", "insurance.officer@mydoctor.test", "/insurance-officer", ()),
-    Actor("claims_reviewer", "claims@mydoctor.test", "/claims-review", ()),
-    Actor("storekeeper", "storekeeper@mydoctor.test", "/storekeeping", ()),
-    Actor("pharmacy", "pharmacy@mydoctor.test", "/pharmacy", ()),
-    Actor("lab", "lab@mydoctor.test", "/lab", ()),
-    Actor("hospital", "hospital@mydoctor.test", "/hospital", ()),
-    Actor("insurance", "insurance@mydoctor.test", "/insurance", ()),
+    Actor("patient", "patient1@healthpilot.test", "/patient", ()),
+    Actor("doctor", "dr.nakato@healthpilot.test", "/doctor", ()),
+    Actor("clinical_officer", "clinical.officer@healthpilot.test", "/clinical-officer", ()),
+    Actor("dentist", "dentist@healthpilot.test", "/dentist", ()),
+    Actor("physiotherapist", "physio@healthpilot.test", "/physiotherapy", ()),
+    Actor("nutritionist", "nutrition@healthpilot.test", "/nutrition", ()),
+    Actor("psychologist", "psychology@healthpilot.test", "/psychology", ()),
+    Actor("medical_director", "medical.director@healthpilot.test", "/medical-director", ()),
+    Actor("nurse", "nurse@healthpilot.test", "/nurse", ()),
+    Actor("midwife", "midwife@healthpilot.test", "/midwife", ()),
+    Actor("theatre_nurse", "theatre.nurse@healthpilot.test", "/theatre-nurse", ()),
+    Actor("receptionist", "reception@healthpilot.test", "/reception", ()),
+    Actor("records_officer", "records@healthpilot.test", "/records", ()),
+    Actor("cashier", "cashier@healthpilot.test", "/cashier", ()),
+    Actor("accountant", "accountant@healthpilot.test", "/accounting", ()),
+    Actor("pharmacist", "pharmacist.staff@healthpilot.test", "/pharmacist", ()),
+    Actor("lab_technician", "labtech@healthpilot.test", "/lab-staff", ()),
+    Actor("radiologist", "radiologist@healthpilot.test", "/radiology", ()),
+    Actor("radiographer", "radiographer@healthpilot.test", "/radiography", ()),
+    Actor("anaesthetist", "anaesthetist@healthpilot.test", "/anaesthesia", ()),
+    Actor("facility_manager", "manager@healthpilot.test", "/facility", ()),
+    Actor("finance_manager", "finance.manager@healthpilot.test", "/finance", ()),
+    Actor("procurement_officer", "procurement@healthpilot.test", "/procurement", ()),
+    Actor("quality_officer", "quality@healthpilot.test", "/quality", ()),
+    Actor("compliance_officer", "compliance@healthpilot.test", "/compliance", ()),
+    Actor("hr_officer", "hr@healthpilot.test", "/hr", ()),
+    Actor("it_support", "it@healthpilot.test", "/it-operations", ()),
+    Actor("ambulance_dispatcher", "dispatcher@healthpilot.test", "/dispatch", ()),
+    Actor("paramedic", "paramedic@healthpilot.test", "/paramedic", ()),
+    Actor("insurance_officer", "insurance.officer@healthpilot.test", "/insurance-officer", ()),
+    Actor("claims_reviewer", "claims@healthpilot.test", "/claims-review", ()),
+    Actor("storekeeper", "storekeeper@healthpilot.test", "/storekeeping", ()),
+    Actor("pharmacy", "pharmacy@healthpilot.test", "/pharmacy", ()),
+    Actor("lab", "lab@healthpilot.test", "/lab", ()),
+    Actor("hospital", "hospital@healthpilot.test", "/hospital", ()),
+    Actor("insurance", "insurance@healthpilot.test", "/insurance", ()),
     ADMIN,
 )
 
@@ -102,12 +103,12 @@ def login(page: Page, base: str, actor: Actor) -> None:
     page.get_by_role("button", name="Sign in securely").click()
     verification = page.get_by_label("Verification code")
     if verification.is_visible(timeout=1500):
-        code = os.getenv(f"MYDOCTOR_MFA_{actor.role.upper()}") or os.getenv("MYDOCTOR_MFA_CODE")
+        code = os.getenv(f"HEALTHPILOT_MFA_{actor.role.upper()}") or os.getenv("HEALTHPILOT_MFA_CODE")
         if not code:
-            raise AssertionError(f"{actor.role} requires MFA; set MYDOCTOR_MFA_{actor.role.upper()} for browser acceptance")
+            raise AssertionError(f"{actor.role} requires MFA; set HEALTHPILOT_MFA_{actor.role.upper()} for browser acceptance")
         verification.fill(code)
         page.get_by_role("button", name="Verify and sign in").click()
-    page.wait_for_url(lambda url: url.path.startswith(actor.home), timeout=20_000)
+    page.wait_for_url(lambda url: urllib.parse.urlparse(str(url)).path.startswith(actor.home), timeout=20_000)
 
 
 def assert_accessible_basics(page: Page) -> None:
@@ -160,7 +161,7 @@ def visit_routes(page: Page, base: str, actor: Actor, routes: Iterable[str]) -> 
         if page.url.endswith("/403") or page.url.endswith("/404") or page.url.endswith("/500"):
             failures.append(f"{route}: redirected to error page {page.url}")
             continue
-        expect(page.locator("main, [role=main], #root")).to_be_visible()
+        expect(page.locator("main, [role=main], #root").first).to_be_visible()
         assert_accessible_basics(page)
         assert_no_dead_controls(page)
     actionable_console = [item for item in console_errors if not any(token in item.lower() for token in ("favicon", "resizeobserver"))]
@@ -220,10 +221,10 @@ def offline_and_print_checks(page: Page, context: BrowserContext, base: str) -> 
     page.evaluate("window.dispatchEvent(new Event('online'))")
 
 
-def run(base: str, headless: bool) -> int:
+def run(base: str, headless: bool, browser_executable: str | None = None) -> int:
     failures = []
     with sync_playwright() as pw:
-        browser: Browser = pw.chromium.launch(headless=headless)
+        browser: Browser = pw.chromium.launch(headless=headless, executable_path=browser_executable)
         try:
             for name, viewport in VIEWPORTS:
                 context = browser.new_context(viewport=viewport)
@@ -250,7 +251,7 @@ def run(base: str, headless: bool) -> int:
                 finally:
                     context.close()
 
-            if os.getenv("MYDOCTOR_CRAWL_ALL_ROLES", "1") == "1":
+            if os.getenv("HEALTHPILOT_CRAWL_ALL_ROLES", "1") == "1":
                 for actor in ALL_ROLE_ACTORS:
                     context = browser.new_context(viewport={"width": 1440, "height": 1000})
                     page = context.new_page()
@@ -262,7 +263,7 @@ def run(base: str, headless: bool) -> int:
                     finally:
                         context.close()
 
-            if os.getenv("MYDOCTOR_TEST_ADMIN", "1") == "1":
+            if os.getenv("HEALTHPILOT_TEST_ADMIN", "1") == "1":
                 context = browser.new_context(viewport={"width": 1440, "height": 1000})
                 page = context.new_page()
                 try:
@@ -285,10 +286,15 @@ def run(base: str, headless: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", default=os.getenv("MYDOCTOR_FRONTEND_URL", "http://127.0.0.1:3000"))
+    parser.add_argument("--base", default=os.getenv("HEALTHPILOT_FRONTEND_URL", "http://127.0.0.1:3000"))
     parser.add_argument("--headed", action="store_true")
+    parser.add_argument(
+        "--browser-executable",
+        default=os.getenv("HEALTHPILOT_BROWSER_EXECUTABLE"),
+        help="Path to a system Chrome/Chromium when the Playwright-managed build is unsupported on this OS.",
+    )
     args = parser.parse_args()
-    return run(args.base.rstrip("/"), not args.headed)
+    return run(args.base.rstrip("/"), not args.headed, args.browser_executable)
 
 
 if __name__ == "__main__":

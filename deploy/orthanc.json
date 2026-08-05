@@ -1,13 +1,13 @@
 {
-  "Name": "MyDoctor PACS",
+  "Name": "HealthPilot PACS",
   "StorageDirectory": "/var/lib/orthanc/db",
   "IndexDirectory": "/var/lib/orthanc/db",
   "RemoteAccessAllowed": true,
   "AuthenticationEnabled": true,
   "RegisteredUsers": {
-    "mydoctor": "change-this-orthanc-password"
+    "healthpilot": "change-this-orthanc-password"
   },
-  "DicomAet": "MYDOCTORPACS",
+  "DicomAet": "HEALTHPILOTPACS",
   "DicomPort": 4242,
   "HttpPort": 8042,
   "DicomWeb": {

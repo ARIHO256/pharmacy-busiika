@@ -28,7 +28,8 @@ class ReviewAdminSerializer(serializers.ModelSerializer):
         model = Review
         fields = [
             "id", "patient", "patient_name", "doctor", "doctor_name",
-            "appointment", "rating", "comment", "created_at",
+            "appointment", "rating", "comment", "status",
+            "moderated_by", "moderated_at", "moderation_note", "created_at",
         ]
 
     def get_patient_name(self, obj):

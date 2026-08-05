@@ -1,4 +1,4 @@
-# MyDoctor Production Completion Release
+# HealthPilot Production Completion Release
 
 This release closes the code-side gates identified during the source audit. It does not fabricate external provider results, clinical approval, legal advice, or disaster-recovery evidence. Promotion is blocked until every automated and human gate has passed for the exact release version.
 

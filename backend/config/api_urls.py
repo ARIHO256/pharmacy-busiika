@@ -1,4 +1,4 @@
-"""MyDoctor public API route table.
+"""HealthPilot public API route table.
 
 Mounted at both ``/api/`` for backwards compatibility and ``/api/v1/`` for
 explicitly versioned integrations.  New partner integrations should use v1.

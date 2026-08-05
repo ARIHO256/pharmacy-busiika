@@ -1,4 +1,4 @@
-# MyDoctor Implementation Status — Full-Scale Release
+# HealthPilot Implementation Status — Full-Scale Release
 
 This document describes what is present in this repository. “Implemented” means the data model, API workflow, role checks and user interface are included. It does **not** mean that a deployment has received regulatory approval or that external providers have been activated with live credentials.
 

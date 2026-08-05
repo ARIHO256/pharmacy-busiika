@@ -33,7 +33,7 @@ class CapabilityStatementView(APIView):
             "status": "active",
             "date": "2026-08-04",
             "kind": "instance",
-            "software": {"name": "MyDoctor HealthOS FHIR Gateway", "version": "1.0.0"},
+            "software": {"name": "HealthPilot HealthOS FHIR Gateway", "version": "1.0.0"},
             "implementation": {"description": "FHIR R4 persistence and partner gateway"},
             "fhirVersion": "4.0.1",
             "format": ["json", "application/fhir+json"],

@@ -12,7 +12,7 @@ def live(request):
     return JsonResponse(
         {
             "status": "ok",
-            "service": "mydoctor-api",
+            "service": "healthpilot-api",
             "request_id": getattr(request, "request_id", ""),
         }
     )
@@ -31,7 +31,7 @@ def ready(request):
         return JsonResponse(
             {
                 "status": "unavailable",
-                "service": "mydoctor-api",
+                "service": "healthpilot-api",
                 "request_id": getattr(request, "request_id", ""),
             },
             status=503,
@@ -39,7 +39,7 @@ def ready(request):
     return JsonResponse(
         {
             "status": "ready",
-            "service": "mydoctor-api",
+            "service": "healthpilot-api",
             "request_id": getattr(request, "request_id", ""),
         }
     )

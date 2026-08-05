@@ -11,10 +11,14 @@ from .serializers import ReviewCreateSerializer, ReviewPublicSerializer
 
 
 def _recompute_average_rating(doctor):
-    """Update the provider profile used by the public professional directory."""
+    """Update the provider profile used by the public professional directory.
+
+    Only visible reviews count; flagged/hidden reviews are excluded until
+    moderation restores them.
+    """
     try:
         from accounts.models import DoctorProfile, StaffProfile
-        avg = round(float(Review.objects.filter(doctor=doctor).aggregate(a=Avg("rating"))["a"] or 0), 2)
+        avg = round(float(Review.objects.filter(doctor=doctor, status=Review.Status.VISIBLE).aggregate(a=Avg("rating"))["a"] or 0), 2)
         if doctor.role == "doctor":
             DoctorProfile.objects.filter(user=doctor).update(average_rating=avg)
         else:
@@ -64,14 +68,14 @@ class AppointmentReviewView(APIView):
 
 
 class DoctorReviewsListView(generics.ListAPIView):
-    """GET /api/doctors/{id}/reviews/ — public."""
+    """GET /api/doctors/{id}/reviews/ — public, visible reviews only."""
 
     permission_classes = [AllowAny]
     serializer_class = ReviewPublicSerializer
 
     def get_queryset(self):
         return (
-            Review.objects.filter(doctor_id=self.kwargs["pk"])
+            Review.objects.filter(doctor_id=self.kwargs["pk"], status=Review.Status.VISIBLE)
             .select_related("patient")
             .order_by("-created_at")
         )

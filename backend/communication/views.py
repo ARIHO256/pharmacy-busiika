@@ -205,10 +205,15 @@ class VideoRoomView(APIView):
             return Response(
                 {"detail": "Appointment is not confirmed"}, status=400
             )
+        mode = request.query_params.get("mode") or request.data.get("mode") or "video"
+        if mode not in ("video", "audio"):
+            return Response({"detail": "mode must be one of video, audio"}, status=400)
         try:
             from enterprise.services import create_telemedicine_session
             from enterprise.serializers import TelemedicineSessionSerializer
-            session = create_telemedicine_session(appointment, request.query_params.get("provider") or None)
+            session = create_telemedicine_session(
+                appointment, request.query_params.get("provider") or None, mode=mode
+            )
             is_host = request.user.id == appointment.doctor_id
             payload = TelemedicineSessionSerializer(session).data
             payload.update({

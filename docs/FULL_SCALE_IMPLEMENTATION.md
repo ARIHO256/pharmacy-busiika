@@ -1,4 +1,4 @@
-# MyDoctor Full-Scale Implementation Report
+# HealthPilot Full-Scale Implementation Report
 
 ## Scope
 

@@ -11,6 +11,7 @@ import SupportCentre from '../operations/SupportCentre'
 import RecordWorkspace from '../enterprise/RecordWorkspace'
 import MedicationSafetyWorkbench from '../enterprise/MedicationSafetyWorkbench'
 import { PHARMACY_CONTROL, PHARMACY_SAFETY } from '../enterprise/coreModules'
+import TeamSchedule from '../staff/TeamSchedule'
 
 export const nav = [
   { to: '/pharmacist', label: 'Pharmacist Dashboard', icon: 'dashboard', end: true, group: 'Overview', description: 'Prescription, dispensing and inventory workload' },
@@ -26,6 +27,7 @@ export const nav = [
   { to: '/pharmacist/controlled-stock', label: 'Controlled Stock Governance', icon: 'audit', group: 'Inventory', description: 'Controlled medicines, cold chain, counts and recalls' },
   { to: '/pharmacist/support', label: 'Support', icon: 'help', group: 'Settings', description: 'Prescription and inventory support' },
 
+  { to: '/pharmacist/team-schedule', label: 'Team Schedule', icon: 'calendar', group: 'Professional tools', description: 'Upcoming appointments for every provider in your organization' },
   ...deepNav('pharmacist', 'pharmacist', { label: 'Complete page centre', group: 'Professional tools' }),
 ]
 
@@ -43,5 +45,6 @@ export const routes = [
   { path: 'controlled-stock', element: <RecordWorkspace module={PHARMACY_CONTROL} /> },
   { path: 'support', element: <SupportCentre /> },
 
+  { path: 'team-schedule', element: <TeamSchedule /> },
   ...deepRoutes('pharmacist', 'pharmacist', { title: 'Pharmacy professional page centre' }),
 ]

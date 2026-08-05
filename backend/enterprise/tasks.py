@@ -67,8 +67,8 @@ def execute_report_run(self, run_id):
         recipients = list(run.parameters.get("recipients") or [])
         if recipients:
             message = EmailMessage(
-                subject=f"MyDoctor report: {run.report.name}",
-                body="The requested MyDoctor operational report is attached.",
+                subject=f"HealthPilot report: {run.report.name}",
+                body="The requested HealthPilot operational report is attached.",
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 to=recipients,
             )

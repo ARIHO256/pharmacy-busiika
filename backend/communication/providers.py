@@ -176,7 +176,7 @@ class ConfiguredWebhookProvider:
             headers[config.get("auth_header", "Authorization")] = f"{config.get('auth_scheme', 'Bearer')} {token}".strip()
         _, data = _request(url, data={
             "recipient": recipient, "title": title, "body": body, "channel": self.provider.channel,
-            "sender": config.get("sender", "MyDoctor"), "metadata": metadata or {},
+            "sender": config.get("sender", "HealthPilot"), "metadata": metadata or {},
         }, headers=headers, timeout=int(config.get("timeout_seconds", 20)))
         return str(data.get("id") or data.get("reference") or data.get("message_id") or "accepted")
 

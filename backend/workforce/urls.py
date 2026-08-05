@@ -15,6 +15,7 @@ from .views import (
     TriageListCreateView,
     VisitActionView,
     VisitListCreateView,
+    TeamScheduleView,
 )
 
 urlpatterns = [
@@ -34,4 +35,5 @@ urlpatterns = [
     path("nursing-notes/", NursingNoteListCreateView.as_view(), name="workforce-nursing-notes"),
     path("medication-administrations/", MedicationAdministrationListCreateView.as_view(), name="workforce-medication-administrations"),
     path("summary/", OperationsSummaryView.as_view(), name="workforce-summary"),
+    path("team-schedule/", TeamScheduleView.as_view(), name="workforce-team-schedule"),
 ]

@@ -6,7 +6,8 @@ from .views import (
     ImagingOrderListCreateView, ImagingReportView, InventoryBatchListCreateView,
     InventoryItemListCreateView, OperationsSummaryView, PurchaseOrderActionView,
     PurchaseOrderListCreateView, StockMovementListCreateView, SubscriptionPlanView,
-    SupportTicketActionView, SupportTicketListCreateView, WardListCreateView,
+    SupportTicketActionView, SupportTicketListCreateView, ComplaintActionView,
+    ComplaintListCreateView, WardListCreateView,
     WardTaskActionView, WardTaskListCreateView,
     AmbulanceDispatchActionView, AmbulanceDispatchListCreateView, EmergencyCaseActionView,
     EmergencyCaseListCreateView, EnterpriseAnalyticsView, LeaveRequestActionView,
@@ -58,5 +59,7 @@ urlpatterns = [
     path("subscriptions/<int:pk>/cancel/", AccountSubscriptionCancelView.as_view(), name="operations-subscription-cancel"),
     path("support/tickets/", SupportTicketListCreateView.as_view(), name="operations-support-tickets"),
     path("support/tickets/<int:pk>/action/", SupportTicketActionView.as_view(), name="operations-support-ticket-action"),
+    path("complaints/", ComplaintListCreateView.as_view(), name="operations-complaints"),
+    path("complaints/<int:pk>/action/", ComplaintActionView.as_view(), name="operations-complaint-action"),
     path("announcements/", AnnouncementListCreateView.as_view(), name="operations-announcements"),
 ]

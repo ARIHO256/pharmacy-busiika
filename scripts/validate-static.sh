@@ -119,8 +119,8 @@ else:
     print('Docker Compose and Prometheus YAML: passed')
 PY
 
-if grep -RIn --exclude-dir=.venv --exclude-dir=__pycache__ --exclude='*.pyc' 'NotImplementedError' backend frontend/src >/tmp/mydoctor-notimplemented.txt; then
-  cat /tmp/mydoctor-notimplemented.txt
+if grep -RIn --exclude-dir=.venv --exclude-dir=__pycache__ --exclude='*.pyc' 'NotImplementedError' backend frontend/src >/tmp/healthpilot-notimplemented.txt; then
+  cat /tmp/healthpilot-notimplemented.txt
   echo 'NotImplementedError markers are not permitted in the release tree.' >&2
   exit 1
 fi

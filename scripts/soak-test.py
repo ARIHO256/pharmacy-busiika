@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """Long-running authenticated multi-role API soak with safe persisted writes."""
 from __future__ import annotations
-import argparse, concurrent.futures, json, random, statistics, sys, time, urllib.request
+import argparse, concurrent.futures, json, random, statistics, sys, time, urllib.error, urllib.request
 
 PASSWORD="DemoPass!2026"
 ACCOUNTS=[
-("patient1@mydoctor.test","patient"),("dr.nakato@mydoctor.test","doctor"),("clinical.officer@mydoctor.test","clinical_officer"),
-("dentist@mydoctor.test","dentist"),("physio@mydoctor.test","physiotherapist"),("nutrition@mydoctor.test","nutritionist"),
-("psychology@mydoctor.test","psychologist"),("medical.director@mydoctor.test","medical_director"),("nurse@mydoctor.test","nurse"),
-("midwife@mydoctor.test","midwife"),("theatre.nurse@mydoctor.test","theatre_nurse"),("reception@mydoctor.test","receptionist"),
-("records@mydoctor.test","records_officer"),("cashier@mydoctor.test","cashier"),("accountant@mydoctor.test","accountant"),
-("finance.manager@mydoctor.test","finance_manager"),("pharmacist.staff@mydoctor.test","pharmacist"),("storekeeper@mydoctor.test","storekeeper"),
-("labtech@mydoctor.test","lab_technician"),("radiologist@mydoctor.test","radiologist"),("radiographer@mydoctor.test","radiographer"),
-("anaesthetist@mydoctor.test","anaesthetist"),("manager@mydoctor.test","facility_manager"),("procurement@mydoctor.test","procurement_officer"),
-("quality@mydoctor.test","quality_officer"),("compliance@mydoctor.test","compliance_officer"),("hr@mydoctor.test","hr_officer"),
-("it@mydoctor.test","it_support"),("dispatcher@mydoctor.test","ambulance_dispatcher"),("paramedic@mydoctor.test","paramedic"),
-("insurance.officer@mydoctor.test","insurance_officer"),("claims@mydoctor.test","claims_reviewer"),("hospital@mydoctor.test","hospital"),
-("pharmacy@mydoctor.test","pharmacy"),("lab@mydoctor.test","lab"),("insurance@mydoctor.test","insurance"),
+("patient1@healthpilot.test","patient"),("dr.nakato@healthpilot.test","doctor"),("clinical.officer@healthpilot.test","clinical_officer"),
+("dentist@healthpilot.test","dentist"),("physio@healthpilot.test","physiotherapist"),("nutrition@healthpilot.test","nutritionist"),
+("psychology@healthpilot.test","psychologist"),("medical.director@healthpilot.test","medical_director"),("nurse@healthpilot.test","nurse"),
+("midwife@healthpilot.test","midwife"),("theatre.nurse@healthpilot.test","theatre_nurse"),("reception@healthpilot.test","receptionist"),
+("records@healthpilot.test","records_officer"),("cashier@healthpilot.test","cashier"),("accountant@healthpilot.test","accountant"),
+("finance.manager@healthpilot.test","finance_manager"),("pharmacist.staff@healthpilot.test","pharmacist"),("storekeeper@healthpilot.test","storekeeper"),
+("labtech@healthpilot.test","lab_technician"),("radiologist@healthpilot.test","radiologist"),("radiographer@healthpilot.test","radiographer"),
+("anaesthetist@healthpilot.test","anaesthetist"),("manager@healthpilot.test","facility_manager"),("procurement@healthpilot.test","procurement_officer"),
+("quality@healthpilot.test","quality_officer"),("compliance@healthpilot.test","compliance_officer"),("hr@healthpilot.test","hr_officer"),
+("it@healthpilot.test","it_support"),("dispatcher@healthpilot.test","ambulance_dispatcher"),("paramedic@healthpilot.test","paramedic"),
+("insurance.officer@healthpilot.test","insurance_officer"),("claims@healthpilot.test","claims_reviewer"),("hospital@healthpilot.test","hospital"),
+("pharmacy@healthpilot.test","pharmacy"),("lab@healthpilot.test","lab"),("insurance@healthpilot.test","insurance"),
 ]
-READS=["/journeys/dashboard/","/auth/me/","/appointments/","/communication/notifications/","/journeys/operational-actions/"]
+READS=["/journeys/dashboard/","/auth/me/","/appointments/","/notifications/","/journeys/operational-actions/"]
 
 def call(url,method="GET",payload=None,token=None,timeout=30):
     started=time.perf_counter();headers={"Content-Type":"application/json"}
@@ -50,6 +50,10 @@ def main():
             status,ms,_=call(args.base+path,token=token)
             if status>=400:raise RuntimeError(status)
             return ms,None
+        except urllib.error.HTTPError as exc:
+            # 403 is an expected authorization denial for cross-role reads, not a defect.
+            if exc.code==403:return None,None
+            return None,f"{role} {path}: {exc}"
         except Exception as exc:return None,f"{role} {path}: {exc}"
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
         while time.monotonic()<deadline:
@@ -58,7 +62,7 @@ def main():
             for ms,error in pool.map(hit,batch):
                 count+=1
                 if error:errors.append(error)
-                else:latencies.append(ms)
+                elif ms is not None:latencies.append(ms)
             if args.write_every > 0 and batches % args.write_every == 0:
                 try:
                     status,ms,body=safe_write(args.base,patient_token,writes+1)

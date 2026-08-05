@@ -43,7 +43,7 @@ EOF
   exit 3
 fi
 
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mydoctor-release.XXXXXX")"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/healthpilot-release.XXXXXX")"
 SERVER_PID=""
 cleanup() {
   if [[ -n "${SERVER_PID:-}" ]]; then

@@ -2,6 +2,7 @@ import datetime
 import unittest
 
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from rest_framework.test import APIClient, APITestCase
 
 from .models import (
@@ -134,10 +135,33 @@ class CartCheckoutTests(APITestCase):
         self.assertEqual(r.status_code, 400)
         self.assertIn("detail", r.data)
 
+    @override_settings(PHARMACY_DELIVERY_FEE=1500)
+    def test_checkout_delivery_adds_configured_fee(self):
+        CartItem.objects.create(patient=self.patient, medicine=self.med, qty=3)
+        r = self.client.post(f"{BASE}/orders/checkout/", {"delivery": True, "address": "Kampala Rd"})
+        self.assertEqual(r.status_code, 201, r.data)
+        order = r.data[0]
+        self.assertEqual(order["total"], 4500)
+        self.assertEqual(order["delivery_fee"], 1500)
+
+        # pharmacy can move a delivery order through the new status
+        self.client.force_authenticate(self.pharmacy)
+        r = self.client.post(f"{BASE}/orders/{order['id']}/update/", {"status": "out_for_delivery"})
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(Order.objects.get(pk=order["id"]).status, "out_for_delivery")
+
+    @override_settings(PHARMACY_DELIVERY_FEE=1500)
+    def test_checkout_pickup_has_no_delivery_fee(self):
+        CartItem.objects.create(patient=self.patient, medicine=self.med, qty=3)
+        r = self.client.post(f"{BASE}/orders/checkout/", {"delivery": False}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data[0]["total"], 3000)
+        self.assertEqual(r.data[0]["delivery_fee"], 0)
+
 
 class LabOrderLifecycleTests(APITestCase):
     def setUp(self):
-        self.lab = make_user("lab@example.com", User.Role.LAB, first_name="Med", last_name="Lab")
+        self.lab = make_user("lab@example.com", User.Role.LAB, first_name="Med", last_name="Lab", is_verified=True)
         self.patient = make_user("pat@example.com", User.Role.PATIENT, first_name="Jane", last_name="Doe")
         self.client = APIClient()
 
@@ -153,16 +177,26 @@ class LabOrderLifecycleTests(APITestCase):
         r = self.client.get(f"{BASE}/lab-tests/?lab={self.lab.id}")
         self.assertEqual(len(r.data), 1)
 
-        # patient books
+        # patient books; a priced test awaits payment before collection
         self.client.force_authenticate(self.patient)
         r = self.client.post(f"{BASE}/lab-orders/", {"lab_id": self.lab.id, "test_id": test_id})
         self.assertEqual(r.status_code, 201, r.data)
         order_id = r.data["id"]
-        self.assertEqual(r.data["status"], "booked")
+        self.assertEqual(r.data["status"], "awaiting_payment")
 
         r = self.client.get(f"{BASE}/lab-orders/")
         self.assertEqual(len(r.data), 1)
         self.assertEqual(r.data[0]["test_name"], "CBC")
+
+        # patient pays through the payments API (mock gateway)
+        r = self.client.post(
+            "/api/payments/initiate/",
+            {"lab_order_id": order_id, "method": "mobile_money"},
+        )
+        self.assertEqual(r.status_code, 201, r.data)
+        r = self.client.post(r.data["checkout_url"])
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(LabOrder.objects.get(pk=order_id).status, "ready_for_collection")
 
         # lab manages: move through statuses, attach notes
         self.client.force_authenticate(self.lab)
@@ -200,6 +234,7 @@ class InsuranceTests(APITestCase):
         r = self.client.post(
             f"{BASE}/policies/",
             {"name": "Gold Plan", "coverage_percent": 80, "premium": 50000, "description": "Full cover"},
+            format="json",
         )
         self.assertEqual(r.status_code, 201, r.data)
         policy_id = r.data["id"]
@@ -221,13 +256,21 @@ class InsuranceTests(APITestCase):
         self.assertEqual(len(r.data), 1)
         self.assertEqual(r.data[0]["policy_name"], "Gold Plan")
 
-        # public verification
+        # verification is authenticated and audited; anonymous callers are rejected
         self.client.force_authenticate(None)
         r = self.client.post(f"{BASE}/coverage/verify/", {"member_id": "MEM-001", "provider_id": self.provider.id})
+        self.assertEqual(r.status_code, 401)
+
+        # a patient may verify their own coverage
+        self.client.force_authenticate(self.patient)
+        r = self.client.post(f"{BASE}/coverage/verify/", {"member_id": "MEM-001", "provider_id": self.provider.id})
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.data, {"valid": True, "policy": "Gold Plan", "coverage_percent": 80})
+        self.assertTrue(r.data["valid"])
+        self.assertEqual(r.data["policy"], "Gold Plan")
+        self.assertEqual(r.data["coverage_percent"], 80)
         r = self.client.post(f"{BASE}/coverage/verify/", {"member_id": "NOPE", "provider_id": self.provider.id})
-        self.assertEqual(r.data, {"valid": False})
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.data["valid"])
 
     def test_claim_lifecycle(self):
         policy = InsurancePolicy.objects.create(
@@ -520,3 +563,49 @@ class ClinicalDispensingTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 403)
+
+
+class ProviderDirectoryTests(APITestCase):
+    def setUp(self):
+        from accounts.models import ProviderProfile
+
+        self.client = APIClient()
+        kampala_pharmacy = make_user("kampala-ph@example.com", User.Role.PHARMACY, is_verified=True)
+        ProviderProfile.objects.create(
+            user=kampala_pharmacy,
+            status="verified",
+            org_name="City Care Pharmacy",
+            district="Kampala",
+            address="Plot 12, Kampala Road",
+        )
+        gulu_pharmacy = make_user("gulu-ph@example.com", User.Role.PHARMACY, is_verified=True)
+        ProviderProfile.objects.create(
+            user=gulu_pharmacy,
+            status="verified",
+            org_name="Rural Health Drugs",
+            district="Gulu",
+            address="Gulu Main Street",
+        )
+
+    def test_directory_lists_all_verified_providers_without_filters(self):
+        r = self.client.get(f"{BASE}/pharmacies/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.data), 2)
+        self.assertEqual(set(r.data[0]), {"id", "org_name", "address"})
+
+    def test_directory_search_matches_org_name_and_address(self):
+        r = self.client.get(f"{BASE}/pharmacies/?search=city care")
+        self.assertEqual([row["org_name"] for row in r.data], ["City Care Pharmacy"])
+        # Case-insensitive match against the address as well.
+        r = self.client.get(f"{BASE}/pharmacies/?search=GULU MAIN")
+        self.assertEqual([row["org_name"] for row in r.data], ["Rural Health Drugs"])
+        r = self.client.get(f"{BASE}/pharmacies/?search=no-such-provider")
+        self.assertEqual(r.data, [])
+
+    def test_directory_location_filter_matches_district_or_address(self):
+        r = self.client.get(f"{BASE}/pharmacies/?location=kampala")
+        self.assertEqual([row["org_name"] for row in r.data], ["City Care Pharmacy"])
+        r = self.client.get(f"{BASE}/pharmacies/?location=gulu")
+        self.assertEqual([row["org_name"] for row in r.data], ["Rural Health Drugs"])
+        r = self.client.get(f"{BASE}/pharmacies/?location=mbarara")
+        self.assertEqual(r.data, [])

@@ -3,17 +3,17 @@
   "editable": true,
   "graphTooltip": 0,
   "panels": [
-    {"type": "stat", "title": "Active Users", "targets": [{"expr": "mydoctor_users_active", "refId": "A"}], "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}},
-    {"type": "stat", "title": "Open Clinical Records", "targets": [{"expr": "mydoctor_enterprise_records_open", "refId": "A"}], "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}},
-    {"type": "stat", "title": "Pending Event Deliveries", "targets": [{"expr": "mydoctor_event_deliveries_pending", "refId": "A"}], "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0}},
-    {"type": "stat", "title": "Open Security Findings", "targets": [{"expr": "mydoctor_security_high_open", "refId": "A"}], "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0}}
+    {"type": "stat", "title": "Active Users", "targets": [{"expr": "healthpilot_users_active", "refId": "A"}], "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}},
+    {"type": "stat", "title": "Open Clinical Records", "targets": [{"expr": "healthpilot_enterprise_records_open", "refId": "A"}], "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}},
+    {"type": "stat", "title": "Pending Event Deliveries", "targets": [{"expr": "healthpilot_event_deliveries_pending", "refId": "A"}], "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0}},
+    {"type": "stat", "title": "Open Security Findings", "targets": [{"expr": "healthpilot_security_high_open", "refId": "A"}], "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0}}
   ],
   "schemaVersion": 40,
-  "tags": ["mydoctor", "healthos"],
+  "tags": ["healthpilot", "healthos"],
   "templating": {"list": []},
   "time": {"from": "now-6h", "to": "now"},
   "timezone": "browser",
-  "title": "MyDoctor Platform Overview",
-  "uid": "mydoctor-overview",
+  "title": "HealthPilot Platform Overview",
+  "uid": "healthpilot-overview",
   "version": 1
 }

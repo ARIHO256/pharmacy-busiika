@@ -1,4 +1,5 @@
 from datetime import timedelta
+import os
 from django.db import transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
@@ -18,14 +19,14 @@ from accounts.roles import (
 from workforce.access import organization_for_user, user_can_manage_organization
 from .models import (
     AccountSubscription, Admission, AdmissionTransfer, AmbulanceDispatch, Announcement, BedAllocation,
-    ClinicalRound, DischargeSummary, EmergencyCase, FacilityBed, ImagingOrder, ImagingReport,
+    ClinicalRound, Complaint, DischargeSummary, EmergencyCase, FacilityBed, ImagingOrder, ImagingReport,
     InventoryBatch, InventoryItem, LeaveRequest, MaternityEpisode, PrivacyRequest, PurchaseOrder,
     PurchaseOrderItem, QualityIncident, StaffShift, StockMovement, SubscriptionPlan, SupportTicket,
     SurgicalCase, SurgicalChecklist, Ward, WardTask,
 )
 from .serializers import (
     AccountSubscriptionSerializer, AdmissionSerializer, AmbulanceDispatchSerializer, AnnouncementSerializer,
-    ClinicalRoundSerializer, DischargeSummarySerializer, EmergencyCaseSerializer, FacilityBedSerializer,
+    ClinicalRoundSerializer, ComplaintSerializer, DischargeSummarySerializer, EmergencyCaseSerializer, FacilityBedSerializer,
     ImagingOrderSerializer, ImagingReportSerializer, InventoryBatchSerializer, InventoryItemSerializer,
     LeaveRequestSerializer, MaternityEpisodeSerializer, PrivacyRequestSerializer, PurchaseOrderSerializer,
     QualityIncidentSerializer, StaffShiftSerializer, StockMovementSerializer, SubscriptionPlanSerializer,
@@ -652,6 +653,24 @@ class AccountSubscriptionView(APIView):
         org = _org_for_request(request) if plan.audience == SubscriptionPlan.Audience.ORGANIZATION else None
         if plan.audience == SubscriptionPlan.Audience.ORGANIZATION and not org:
             return Response({"detail": "Organization plan requires an organization account."}, status=400)
+        method = "mobile_money"
+        selected_gateway = None
+        if plan.price > 0:
+            # Paid plans are invoiced and activate only when payment confirms.
+            method = str(request.data.get("method") or "mobile_money")
+            requested_gateway = str(request.data.get("gateway") or "").strip().lower()
+            gateway_by_method = {
+                "mobile_money": {"mtn_momo", "airtel_money", "flutterwave", "mock"},
+                "card": {"flutterwave", "paystack", "mock"},
+            }
+            if method not in gateway_by_method:
+                return Response({"detail": "method must be one of mobile_money, card"}, status=400)
+            from django.conf import settings as django_settings
+
+            default_gateway = "mock" if django_settings.MOCK_PAYMENTS else os.getenv("PAYMENT_GATEWAY", "flutterwave")
+            selected_gateway = requested_gateway or default_gateway
+            if selected_gateway not in gateway_by_method[method]:
+                return Response({"detail": f"Gateway {selected_gateway} is not available for {method}."}, status=400)
         AccountSubscription.objects.filter(
             Q(user=request.user) | Q(organization=org),
             status__in=[AccountSubscription.Status.TRIAL, AccountSubscription.Status.ACTIVE],
@@ -666,7 +685,51 @@ class AccountSubscriptionView(APIView):
             auto_renew=bool(request.data.get("auto_renew", True)),
         )
         _audit(request, "subscription.created", row)
-        return Response(AccountSubscriptionSerializer(row).data, status=201)
+        if plan.price == 0:
+            return Response(AccountSubscriptionSerializer(row).data, status=201)
+
+        from payments.models import Invoice, InvoiceItem
+        from payments.gateways import get_gateway
+
+        invoice = Invoice.objects.create(
+            patient=request.user,
+            gateway=selected_gateway,
+            source_type=Invoice.SourceType.SUBSCRIPTION,
+            source_id=str(row.id),
+        )
+        InvoiceItem.objects.create(
+            invoice=invoice,
+            code=plan.code,
+            description=f"{plan.name} subscription ({plan.get_billing_cycle_display()})",
+            quantity=1,
+            unit_price=plan.price,
+            service_type="subscription",
+            source_id=str(row.id),
+        )
+        invoice.recalculate_amount()
+        gateway = get_gateway(invoice.gateway)
+        try:
+            result = gateway.initiate(invoice, phone=request.data.get("phone"))
+        except Exception as exc:
+            return Response(
+                {"detail": f"{invoice.gateway} gateway could not be initialized: {exc}"}, status=503
+            )
+        invoice.gateway_ref = result["ref"]
+        invoice.save(update_fields=["gateway_ref", "updated_at"])
+        return Response(
+            {
+                **AccountSubscriptionSerializer(row).data,
+                "invoice_number": invoice.number,
+                "amount": invoice.amount,
+                "ref": result["ref"],
+                "checkout_url": result.get("checkout_url", ""),
+                "instructions": result.get("instructions", ""),
+                "gateway": invoice.gateway,
+                "payment_status": result.get("status", "initiated"),
+                "mock": invoice.gateway == "mock",
+            },
+            status=201,
+        )
 
 
 class AccountSubscriptionCancelView(APIView):
@@ -721,6 +784,53 @@ class SupportTicketActionView(APIView):
         _notify(ticket.requester, "Support ticket updated", f"Ticket {ticket.number} is now {ticket.get_status_display()}.", "/notification-settings")
         _audit(request, "support_ticket.updated", ticket)
         return Response(SupportTicketSerializer(ticket).data)
+
+
+class ComplaintListCreateView(APIView):
+    def get(self, request):
+        if _is_admin(request.user):
+            qs = Complaint.objects.select_related("complainant", "against_user", "handled_by")
+        else:
+            qs = Complaint.objects.filter(complainant=request.user).select_related("complainant", "against_user", "handled_by")
+        return Response(ComplaintSerializer(qs, many=True).data)
+
+    def post(self, request):
+        serializer = ComplaintSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        complaint = serializer.save(complainant=request.user)
+        _audit(request, "complaint.created", complaint)
+        return Response(ComplaintSerializer(complaint).data, status=201)
+
+
+class ComplaintActionView(APIView):
+    def post(self, request, pk):
+        complaint = Complaint.objects.filter(pk=pk).select_related("complainant", "against_user").first()
+        if not complaint:
+            return Response({"detail": "Complaint not found."}, status=404)
+        if not _is_admin(request.user):
+            return Response({"detail": "Not permitted."}, status=403)
+        action = request.data.get("action")
+        transitions = {
+            "start_review": Complaint.Status.IN_REVIEW,
+            "resolve": Complaint.Status.RESOLVED,
+            "dismiss": Complaint.Status.DISMISSED,
+        }
+        if action not in transitions:
+            return Response({"detail": "action must be start_review|resolve|dismiss"}, status=400)
+        complaint.status = transitions[action]
+        complaint.handled_by = request.user
+        if "resolution_notes" in request.data:
+            complaint.resolution_notes = request.data["resolution_notes"]
+        complaint.save(update_fields=["status", "handled_by", "resolution_notes", "updated_at"])
+        for recipient in {complaint.complainant, complaint.against_user}:
+            _notify(
+                recipient,
+                "Complaint updated",
+                f"A complaint you are involved in is now {complaint.get_status_display()}.",
+                "/notification-settings",
+            )
+        _audit(request, f"complaint.{action}", complaint)
+        return Response(ComplaintSerializer(complaint).data)
 
 
 class AnnouncementListCreateView(APIView):

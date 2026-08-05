@@ -232,6 +232,7 @@ class DoctorProfile(models.Model):
     certificates = models.FileField(
         upload_to="doctors/certificates/", null=True, blank=True
     )
+    photo = models.ImageField(upload_to="doctors/photos/", null=True, blank=True)
     status = models.CharField(
         max_length=20,
         choices=ProfileStatus.choices,

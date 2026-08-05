@@ -110,4 +110,13 @@ def account_login(request, email, password):
     authenticated.locked_until = None
     authenticated.save(update_fields=["failed_login_attempts", "locked_until", "last_login"])
     record_security_event(request, SecurityEvent.Type.LOGIN_SUCCESS, authenticated)
+    try:
+        send_security_email(
+            authenticated,
+            "New sign-in to your HealthPilot account",
+            f"Your account was signed in on {timezone.localtime(now).strftime('%d %b %Y at %H:%M')}. "
+            "If this was not you, reset your password immediately and contact support.",
+        )
+    except Exception:
+        pass
     return authenticated

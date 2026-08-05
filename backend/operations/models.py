@@ -472,6 +472,35 @@ class SupportTicket(models.Model):
         super().save(*args, **kwargs)
 
 
+class Complaint(models.Model):
+    class Category(models.TextChoices):
+        SERVICE = "service", "Service"
+        BILLING = "billing", "Billing"
+        CONDUCT = "conduct", "Conduct"
+        TECHNICAL = "technical", "Technical"
+        OTHER = "other", "Other"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        IN_REVIEW = "in_review", "In review"
+        RESOLVED = "resolved", "Resolved"
+        DISMISSED = "dismissed", "Dismissed"
+
+    complainant = models.ForeignKey(AUTH_USER, on_delete=models.CASCADE, related_name="complaints")
+    against_user = models.ForeignKey(AUTH_USER, null=True, blank=True, on_delete=models.SET_NULL, related_name="complaints_against")
+    appointment = models.ForeignKey("appointments.Appointment", null=True, blank=True, on_delete=models.SET_NULL, related_name="complaints")
+    category = models.CharField(max_length=20, choices=Category.choices, default=Category.OTHER)
+    description = models.TextField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    resolution_notes = models.TextField(blank=True, default="")
+    handled_by = models.ForeignKey(AUTH_USER, null=True, blank=True, on_delete=models.SET_NULL, related_name="handled_complaints")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 class Announcement(models.Model):
     class Audience(models.TextChoices):
         ALL = "all", "Everyone"

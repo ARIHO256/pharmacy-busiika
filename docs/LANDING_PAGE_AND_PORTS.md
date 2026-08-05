@@ -4,7 +4,7 @@
 
 The React application now exposes a public marketing website at `/` instead of immediately redirecting unauthenticated visitors to the sign-in page.
 
-The design is inspired by the supplied premium dark marketplace reference, but it has been rebuilt specifically for MyDoctor and does not copy the original page content or imagery.
+The design is inspired by the supplied premium dark marketplace reference, but it has been rebuilt specifically for HealthPilot and does not copy the original page content or imagery.
 
 ### Landing-page sections
 
@@ -21,7 +21,7 @@ The design is inspired by the supplied premium dark marketplace reference, but i
 
 ### Application routes
 
-- `/` — public MyDoctor landing page
+- `/` — public HealthPilot landing page
 - `/dashboard` — sends an authenticated user to the correct role portal
 - `/login` — sign in
 - `/register` — patient or provider registration

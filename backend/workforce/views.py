@@ -1,3 +1,6 @@
+import secrets
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Count, Q
@@ -149,7 +152,7 @@ class StaffListInviteView(APIView):
             from django.core.mail import send_mail
 
             send_mail(
-                subject=f"Invitation to join {organization.legal_name} on MyDoctor",
+                subject=f"Invitation to join {organization.legal_name} on HealthPilot",
                 message=f"You have been invited as {invitation.get_role_display() if hasattr(invitation, 'get_role_display') else invitation.role}. Invitation token: {invitation.token}",
                 from_email=None,
                 recipient_list=[invitation.email],
@@ -324,7 +327,7 @@ class PatientSearchCreateView(APIView):
         email = User.objects.normalize_email(request.data["email"])
         if User.objects.filter(email__iexact=email).exists():
             return Response({"detail": "A user with this email already exists."}, status=409)
-        temporary_password = User.objects.make_random_password(length=14)
+        temporary_password = secrets.token_urlsafe(10)[:14]
         patient = User.objects.create_user(
             email=email,
             password=temporary_password,
@@ -589,5 +592,64 @@ class OperationsSummaryView(APIView):
                     .annotate(count=Count("id"))
                     .order_by("role")
                 ),
+            }
+        )
+
+
+class TeamScheduleView(APIView):
+    """Read-only cross-provider schedule: any staff member can see upcoming
+    appointments for every provider in their organization."""
+
+    permission_classes = [IsRole]
+    allowed_roles = VISIT_ROLES
+
+    def get(self, request):
+        from appointments.models import Appointment
+
+        organization = _organization_or_error(request)
+        if not organization:
+            return Response({"detail": "No organization is in scope."}, status=400)
+        days = min(int(request.query_params.get("days", 14) or 14), 60)
+        horizon = timezone.localdate() + timedelta(days=days)
+        appointments = (
+            Appointment.objects.filter(
+                doctor__staff_memberships__organization=organization,
+                date__gte=timezone.localdate(),
+                date__lte=horizon,
+            )
+            .exclude(status__in=[Appointment.Status.CANCELLED, Appointment.Status.MISSED])
+            .select_related("doctor", "patient")
+            .order_by("date", "start_time")
+            .distinct()
+        )
+        providers = {}
+        for appointment in appointments:
+            entry = providers.setdefault(
+                appointment.doctor_id,
+                {
+                    "provider_id": appointment.doctor_id,
+                    "provider_name": appointment.doctor.display_name,
+                    "role": appointment.doctor.role,
+                    "appointments": [],
+                },
+            )
+            entry["appointments"].append(
+                {
+                    "id": appointment.id,
+                    "date": appointment.date.isoformat(),
+                    "start_time": appointment.start_time.strftime("%H:%M"),
+                    "end_time": appointment.end_time.strftime("%H:%M"),
+                    "patient_name": appointment.patient.display_name,
+                    "type": appointment.type,
+                    "status": appointment.status,
+                    "reason": appointment.reason,
+                }
+            )
+        return Response(
+            {
+                "organization": organization.legal_name,
+                "from": timezone.localdate().isoformat(),
+                "to": horizon.isoformat(),
+                "providers": sorted(providers.values(), key=lambda row: row["provider_name"]),
             }
         )

@@ -11,6 +11,14 @@ AUTH_USER = settings.AUTH_USER_MODEL
 # ---------------------------------------------------------------------------
 class Medicine(models.Model):
     pharmacy = models.ForeignKey(AUTH_USER, on_delete=models.CASCADE, related_name="medicines")
+    inventory_item = models.ForeignKey(
+        "operations.InventoryItem",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="store_listings",
+        help_text="Linked operations inventory record kept in sync with store stock.",
+    )
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True, default="")
     price = models.IntegerField()
@@ -34,6 +42,7 @@ class Order(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         CONFIRMED = "confirmed", "Confirmed"
+        OUT_FOR_DELIVERY = "out_for_delivery", "Out for delivery"
         DELIVERED = "delivered", "Delivered"
         CANCELLED = "cancelled", "Cancelled"
 
@@ -42,6 +51,7 @@ class Order(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     total = models.IntegerField(default=0)
     delivery = models.BooleanField(default=False)
+    delivery_fee = models.IntegerField(default=0)
     address = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 

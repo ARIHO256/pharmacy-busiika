@@ -12,6 +12,7 @@ import SupportCentre from '../operations/SupportCentre'
 import MaternityCare from '../operations/MaternityCare'
 import WorkforceSchedule from '../operations/WorkforceSchedule'
 import TheatreCases from '../operations/TheatreCases'
+import TeamSchedule from '../staff/TeamSchedule'
 
 export const nav = [
   { to: '/nurse', label: 'Nursing Dashboard', icon: 'dashboard', end: true, group: 'Overview', description: 'Patient flow, urgency and current care workload' },
@@ -30,6 +31,7 @@ export const nav = [
   { to: '/nurse/schedule', label: 'My Duty Roster', icon: 'calendar', group: 'Workforce', description: 'Shifts, confirmations and leave requests' },
   { to: '/nurse/support', label: 'Support', icon: 'help', group: 'Settings', description: 'Report workflow or account issues' },
 
+  { to: '/nurse/team-schedule', label: 'Team Schedule', icon: 'calendar', group: 'Patient care', description: 'Upcoming appointments for every provider in your organization' },
   ...deepNav('nurse', 'nurse', { label: 'Complete page centre', group: 'Professional tools' }),
 ]
 export const routes = [
@@ -49,5 +51,6 @@ export const routes = [
   { path: 'schedule', element: <WorkforceSchedule /> },
   { path: 'support', element: <SupportCentre /> },
 
+  { path: 'team-schedule', element: <TeamSchedule /> },
   ...deepRoutes('nurse', 'nurse', { title: 'Nursing page centre' }),
 ]

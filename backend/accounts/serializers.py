@@ -376,7 +376,7 @@ class DependentCreateSerializer(serializers.Serializer):
         import uuid
 
         caregiver = self.context["request"].user
-        internal_email = f"dependent.{uuid.uuid4().hex}@patients.mydoctor.local"
+        internal_email = f"dependent.{uuid.uuid4().hex}@patients.healthpilot.local"
         patient = User.objects.create(
             email=internal_email,
             first_name=validated_data["first_name"].strip(),
@@ -423,8 +423,6 @@ class DependentCreateSerializer(serializers.Serializer):
 
 
 class ProtectedCredentialMixin:
-    license_document_url = serializers.SerializerMethodField()
-
     def get_license_document_url(self, obj):
         request = self.context.get("request")
         user = getattr(request, "user", None)
@@ -449,9 +447,11 @@ class ProtectedCredentialMixin:
 
 
 class DoctorProfileSerializer(ProtectedCredentialMixin, serializers.ModelSerializer):
+    license_document_url = serializers.SerializerMethodField()
     license_document = serializers.FileField(write_only=True, required=False, allow_null=False, validators=[validate_credential_upload])
     certificates = serializers.FileField(write_only=True, required=False, allow_null=True, validators=[validate_credential_upload])
     certificates_uploaded = serializers.SerializerMethodField()
+    photo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = DoctorProfile
@@ -472,6 +472,8 @@ class DoctorProfileSerializer(ProtectedCredentialMixin, serializers.ModelSeriali
             "license_document_url",
             "certificates",
             "certificates_uploaded",
+            "photo",
+            "photo_url",
             "status",
             "verification_notes",
             "average_rating",
@@ -479,10 +481,18 @@ class DoctorProfileSerializer(ProtectedCredentialMixin, serializers.ModelSeriali
         read_only_fields = [
             "license_document_url",
             "certificates_uploaded",
+            "photo_url",
             "status",
             "verification_notes",
             "average_rating",
         ]
+
+    def get_photo_url(self, obj):
+        if not obj.photo:
+            return None
+        request = self.context.get("request")
+        url = obj.photo.url
+        return request.build_absolute_uri(url) if request else url
 
     def get_certificates_uploaded(self, obj):
         return bool(obj.certificates)
@@ -702,6 +712,7 @@ class ProviderProfileSerializer(serializers.ModelSerializer):
 
 class StaffProfileSerializer(ProtectedCredentialMixin, serializers.ModelSerializer):
     license_document = serializers.FileField(write_only=True, required=False, allow_null=True, validators=[validate_credential_upload])
+    license_document_url = serializers.SerializerMethodField()
 
     class Meta:
         model = StaffProfile
@@ -799,6 +810,7 @@ class PublicDoctorSerializer(serializers.Serializer):
     fees = serializers.IntegerField()
     bio = serializers.CharField()
     average_rating = serializers.DecimalField(max_digits=3, decimal_places=2)
+    photo_url = serializers.CharField(allow_null=True)
 
 
 class PublicDoctorDetailSerializer(PublicDoctorSerializer):

@@ -42,6 +42,7 @@ export default function Profile() {
   const [profileForm, setProfileForm] = useState(initialProfile)
   const [license, setLicense] = useState(null)
   const [certificates, setCertificates] = useState(null)
+  const [photo, setPhoto] = useState(null)
   const [saving, setSaving] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -123,6 +124,21 @@ export default function Profile() {
     finally { setSaving('') }
   }
 
+  async function uploadPhoto(event) {
+    event.preventDefault()
+    if (!photo) return setError('Choose a profile photo first.')
+    setSaving('photo'); setMessage(''); setError('')
+    try {
+      const form = new FormData()
+      form.append('photo', photo)
+      const response = await client.patch('/auth/me/profile/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      setProfile(response.data); setPhoto(null)
+      setMessage('Profile photo updated.')
+      await load()
+    } catch (err) { setError(err.response?.data?.detail || 'Profile photo could not be uploaded.') }
+    finally { setSaving('') }
+  }
+
   async function submitCredential(event) {
     event.preventDefault(); setSaving('credential'); setMessage(''); setError('')
     try {
@@ -147,6 +163,30 @@ export default function Profile() {
             <div className="flex items-end"><Button disabled={saving === 'account'}>{saving === 'account' ? 'Saving…' : 'Save identity'}</Button></div>
           </form>
         </Card>
+        {doctorMode && (
+          <Card title="Profile photo">
+            <form onSubmit={uploadPhoto} className="space-y-4">
+              <div className="flex items-center gap-4">
+                {profile.photo_url ? (
+                  <img src={profile.photo_url} alt="Current profile" className="h-20 w-20 rounded-2xl border border-slate-200 object-cover" />
+                ) : (
+                  <span className="grid h-20 w-20 place-items-center rounded-2xl bg-primary-50 text-2xl font-bold text-primary-700">
+                    {(me.first_name || 'D')[0]}{(me.last_name || '')[0] || ''}
+                  </span>
+                )}
+                <p className="text-sm text-slate-500">A clear headshot helps patients recognise you before a consultation.</p>
+              </div>
+              <input
+                type="file"
+                accept="image/*"
+                aria-label="Profile photo file"
+                onChange={(event) => setPhoto(event.target.files?.[0] || null)}
+                className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-primary-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary-700"
+              />
+              <Button disabled={saving === 'photo' || !photo}>{saving === 'photo' ? 'Uploading…' : 'Upload photo'}</Button>
+            </form>
+          </Card>
+        )}
         <Card title="Professional standing">
           <div className="space-y-4">
             <div className="flex items-center justify-between"><span className="text-sm text-slate-500">Verification</span><Badge color={statusColor(profile.status || 'pending')}>{profile.status || 'pending'}</Badge></div>

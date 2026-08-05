@@ -1,4 +1,4 @@
-"""Create a broad, idempotent MyDoctor demonstration dataset.
+"""Create a broad, idempotent HealthPilot demonstration dataset.
 
 Run after migrations:
     python seed.py
@@ -132,43 +132,43 @@ LICENCE_EXPIRY = TODAY + dt.timedelta(days=420)
 # database assertion against this catalogue so role/portal demos cannot silently
 # drift apart.
 DEMO_ROLE_ACCOUNTS = {
-    "patient": "patient1@mydoctor.test",
-    "doctor": "dr.nakato@mydoctor.test",
-    "nurse": "nurse@mydoctor.test",
-    "receptionist": "reception@mydoctor.test",
-    "cashier": "cashier@mydoctor.test",
-    "pharmacist": "pharmacist.staff@mydoctor.test",
-    "lab_technician": "labtech@mydoctor.test",
-    "facility_manager": "manager@mydoctor.test",
-    "records_officer": "records@mydoctor.test",
-    "insurance_officer": "insurance.officer@mydoctor.test",
-    "storekeeper": "storekeeper@mydoctor.test",
-    "midwife": "midwife@mydoctor.test",
-    "clinical_officer": "clinical.officer@mydoctor.test",
-    "dentist": "dentist@mydoctor.test",
-    "radiologist": "radiologist@mydoctor.test",
-    "radiographer": "radiographer@mydoctor.test",
-    "physiotherapist": "physio@mydoctor.test",
-    "nutritionist": "nutrition@mydoctor.test",
-    "psychologist": "psychology@mydoctor.test",
-    "anaesthetist": "anaesthetist@mydoctor.test",
-    "theatre_nurse": "theatre.nurse@mydoctor.test",
-    "medical_director": "medical.director@mydoctor.test",
-    "accountant": "accountant@mydoctor.test",
-    "finance_manager": "finance.manager@mydoctor.test",
-    "procurement_officer": "procurement@mydoctor.test",
-    "quality_officer": "quality@mydoctor.test",
-    "compliance_officer": "compliance@mydoctor.test",
-    "hr_officer": "hr@mydoctor.test",
-    "it_support": "it@mydoctor.test",
-    "claims_reviewer": "claims@mydoctor.test",
-    "ambulance_dispatcher": "dispatcher@mydoctor.test",
-    "paramedic": "paramedic@mydoctor.test",
-    "pharmacy": "pharmacy@mydoctor.test",
-    "lab": "lab@mydoctor.test",
-    "hospital": "hospital@mydoctor.test",
-    "insurance": "insurance@mydoctor.test",
-    "admin": "admin@mydoctor.test",
+    "patient": "patient1@healthpilot.test",
+    "doctor": "dr.nakato@healthpilot.test",
+    "nurse": "nurse@healthpilot.test",
+    "receptionist": "reception@healthpilot.test",
+    "cashier": "cashier@healthpilot.test",
+    "pharmacist": "pharmacist.staff@healthpilot.test",
+    "lab_technician": "labtech@healthpilot.test",
+    "facility_manager": "manager@healthpilot.test",
+    "records_officer": "records@healthpilot.test",
+    "insurance_officer": "insurance.officer@healthpilot.test",
+    "storekeeper": "storekeeper@healthpilot.test",
+    "midwife": "midwife@healthpilot.test",
+    "clinical_officer": "clinical.officer@healthpilot.test",
+    "dentist": "dentist@healthpilot.test",
+    "radiologist": "radiologist@healthpilot.test",
+    "radiographer": "radiographer@healthpilot.test",
+    "physiotherapist": "physio@healthpilot.test",
+    "nutritionist": "nutrition@healthpilot.test",
+    "psychologist": "psychology@healthpilot.test",
+    "anaesthetist": "anaesthetist@healthpilot.test",
+    "theatre_nurse": "theatre.nurse@healthpilot.test",
+    "medical_director": "medical.director@healthpilot.test",
+    "accountant": "accountant@healthpilot.test",
+    "finance_manager": "finance.manager@healthpilot.test",
+    "procurement_officer": "procurement@healthpilot.test",
+    "quality_officer": "quality@healthpilot.test",
+    "compliance_officer": "compliance@healthpilot.test",
+    "hr_officer": "hr@healthpilot.test",
+    "it_support": "it@healthpilot.test",
+    "claims_reviewer": "claims@healthpilot.test",
+    "ambulance_dispatcher": "dispatcher@healthpilot.test",
+    "paramedic": "paramedic@healthpilot.test",
+    "pharmacy": "pharmacy@healthpilot.test",
+    "lab": "lab@healthpilot.test",
+    "hospital": "hospital@healthpilot.test",
+    "insurance": "insurance@healthpilot.test",
+    "admin": "admin@healthpilot.test",
 }
 
 
@@ -285,7 +285,7 @@ def upsert_professional_profile(user, title, registration_number, professional=T
             "year_of_completion": 2020 if professional else None,
             "qualification": title,
             "specialty": title if user.role in BOOKABLE_PROVIDER_ROLES else "",
-            "workplace": "MyDoctor Demonstration Facility" if user.role in BOOKABLE_PROVIDER_ROLES else "",
+            "workplace": "HealthPilot Demonstration Facility" if user.role in BOOKABLE_PROVIDER_ROLES else "",
             "experience_years": 6 if user.role in BOOKABLE_PROVIDER_ROLES else 0,
             "consultation_fee": 45000 if user.role in BOOKABLE_PROVIDER_ROLES else 0,
             "offers_appointments": user.role in BOOKABLE_PROVIDER_ROLES,
@@ -369,7 +369,7 @@ def seed_permissions(organizations, memberships):
                 code=role_code.replace("_", "-"),
                 defaults={
                     "name": role_code.replace("_", " ").title(),
-                    "description": "System role seeded from the MyDoctor least-privilege catalogue.",
+                    "description": "System role seeded from the HealthPilot least-privilege catalogue.",
                     "active": True,
                     "is_system": True,
                     "created_by": organization.owner,
@@ -395,16 +395,16 @@ def seed_permissions(organizations, memberships):
 @transaction.atomic
 def run():
     admin = make_user(
-        "admin@mydoctor.test", "admin", "Platform", "Administrator",
+        "admin@healthpilot.test", "admin", "Platform", "Administrator",
         "+256 700 000 001", staff=True, superuser=True,
     )
 
     patient_specs = [
-        ("patient1@mydoctor.test", "Amina", "Nansubuga", "+256 700 101 001", dt.date(1995, 4, 12), "female", "O+", "Kampala"),
-        ("patient2@mydoctor.test", "Brian", "Okello", "+256 700 101 002", dt.date(1988, 9, 3), "male", "A+", "Wakiso"),
-        ("patient3@mydoctor.test", "Mariam", "Achen", "+256 700 101 003", dt.date(2000, 1, 17), "female", "B+", "Mukono"),
-        ("patient4@mydoctor.test", "Samuel", "Kato", "+256 700 101 004", dt.date(1974, 6, 22), "male", "O-", "Kampala"),
-        ("patient5@mydoctor.test", "Joan", "Atim", "+256 700 101 005", dt.date(1992, 11, 8), "female", "AB+", "Entebbe"),
+        ("patient1@healthpilot.test", "Amina", "Nansubuga", "+256 700 101 001", dt.date(1995, 4, 12), "female", "O+", "Kampala"),
+        ("patient2@healthpilot.test", "Brian", "Okello", "+256 700 101 002", dt.date(1988, 9, 3), "male", "A+", "Wakiso"),
+        ("patient3@healthpilot.test", "Mariam", "Achen", "+256 700 101 003", dt.date(2000, 1, 17), "female", "B+", "Mukono"),
+        ("patient4@healthpilot.test", "Samuel", "Kato", "+256 700 101 004", dt.date(1974, 6, 22), "male", "O-", "Kampala"),
+        ("patient5@healthpilot.test", "Joan", "Atim", "+256 700 101 005", dt.date(1992, 11, 8), "female", "AB+", "Entebbe"),
     ]
     patients = []
     for email, first, last, phone, dob, gender, blood, location in patient_specs:
@@ -414,7 +414,7 @@ def run():
     p1, p2, p3, p4, p5 = patients
 
     dependent = make_user(
-        "dependent.joy@patients.mydoctor.local", "patient", "Joy", "Nansubuga", ""
+        "dependent.joy@patients.healthpilot.local", "patient", "Joy", "Nansubuga", ""
     )
     dependent.set_unusable_password()
     dependent.save(update_fields=["password"])
@@ -432,19 +432,19 @@ def run():
     )
 
     hospital_owner, hospital_org = upsert_provider(
-        "hospital@mydoctor.test", "hospital", "Hope", "Medical Centre", "+256 700 200 001",
+        "hospital@healthpilot.test", "hospital", "Hope", "Medical Centre", "+256 700 200 001",
         "Hope Medical Centre", Organization.Type.HOSPITAL, "HFA-DEMO-1001", "Wandegeya, Kampala",
     )
     pharmacy_owner, pharmacy_org = upsert_provider(
-        "pharmacy@mydoctor.test", "pharmacy", "Busiika", "Pharmacy", "+256 700 200 002",
+        "pharmacy@healthpilot.test", "pharmacy", "Busiika", "Pharmacy", "+256 700 200 002",
         "Busiika Pharmacy", Organization.Type.PHARMACY, "NDA-DEMO-2001", "Kampala Road",
     )
     lab_owner, lab_org = upsert_provider(
-        "lab@mydoctor.test", "lab", "City", "Diagnostics", "+256 700 200 003",
+        "lab@healthpilot.test", "lab", "City", "Diagnostics", "+256 700 200 003",
         "City Diagnostics Laboratory", Organization.Type.LABORATORY, "AHPC-DEMO-3001", "Nakasero, Kampala",
     )
     insurer_owner, insurer_org = upsert_provider(
-        "insurance@mydoctor.test", "insurance", "SafeHealth", "Insurance", "+256 700 200 004",
+        "insurance@healthpilot.test", "insurance", "SafeHealth", "Insurance", "+256 700 200 004",
         "SafeHealth Insurance", Organization.Type.INSURER, "IRA-DEMO-4001", "Nakawa, Kampala",
     )
 
@@ -484,9 +484,9 @@ def run():
     # Doctors use the doctor profile and can be directly listed after verification.
     doctors = []
     doctor_specs = [
-        ("dr.nakato@mydoctor.test", "Sarah", "Nakato", "+256 700 300 001", "General Medicine", "medical_officer", 30000, "MDC-DEMO-0001"),
-        ("dr.kato@mydoctor.test", "James", "Kato", "+256 700 300 002", "Paediatrics", "specialist", 45000, "MDC-DEMO-0002"),
-        ("dr.aina@mydoctor.test", "Grace", "Aina", "+256 700 300 003", "Dermatology", "specialist", 50000, "MDC-DEMO-0003"),
+        ("dr.nakato@healthpilot.test", "Sarah", "Nakato", "+256 700 300 001", "General Medicine", "medical_officer", 30000, "MDC-DEMO-0001"),
+        ("dr.kato@healthpilot.test", "James", "Kato", "+256 700 300 002", "Paediatrics", "specialist", 45000, "MDC-DEMO-0002"),
+        ("dr.aina@healthpilot.test", "Grace", "Aina", "+256 700 300 003", "Dermatology", "specialist", 50000, "MDC-DEMO-0003"),
     ]
     memberships = []
     for email, first, last, phone, specialty, cadre, fee, licence in doctor_specs:
@@ -565,39 +565,39 @@ def run():
 
     staff_specs = [
         # email, role, names, phone, org, dept code, title, regulated
-        ("clinical.officer@mydoctor.test", "clinical_officer", "Daniel", "Mugisha", "+256 701 400 001", hospital_org, "OPD", "Senior Clinical Officer", True),
-        ("dentist@mydoctor.test", "dentist", "Lydia", "Nabwire", "+256 701 400 002", hospital_org, "OPD", "Dental Surgeon", True),
-        ("medical.director@mydoctor.test", "medical_director", "Peter", "Ouma", "+256 701 400 003", hospital_org, "OPD", "Medical Director", True),
-        ("nurse@mydoctor.test", "nurse", "Esther", "Nabirye", "+256 701 400 004", hospital_org, "NUR", "Registered Nurse", True),
-        ("midwife@mydoctor.test", "midwife", "Rebecca", "Nalukenge", "+256 701 400 005", hospital_org, "MAT", "Registered Midwife", True),
-        ("theatre.nurse@mydoctor.test", "theatre_nurse", "Martha", "Akello", "+256 701 400 006", hospital_org, "THR", "Theatre Nurse", True),
-        ("anaesthetist@mydoctor.test", "anaesthetist", "Michael", "Obote", "+256 701 400 007", hospital_org, "THR", "Anaesthetist", True),
-        ("radiologist@mydoctor.test", "radiologist", "Christine", "Namara", "+256 701 400 008", hospital_org, "RAD", "Consultant Radiologist", True),
-        ("radiographer@mydoctor.test", "radiographer", "Alex", "Tumwine", "+256 701 400 009", hospital_org, "RAD", "Radiographer", True),
-        ("physio@mydoctor.test", "physiotherapist", "Anita", "Kiconco", "+256 701 400 010", hospital_org, "PHY", "Physiotherapist", True),
-        ("nutrition@mydoctor.test", "nutritionist", "Brenda", "Auma", "+256 701 400 011", hospital_org, "NUT", "Clinical Nutritionist", True),
-        ("psychology@mydoctor.test", "psychologist", "David", "Ssemakula", "+256 701 400 012", hospital_org, "PSY", "Clinical Psychologist", True),
-        ("paramedic@mydoctor.test", "paramedic", "Ivan", "Ocen", "+256 701 400 013", hospital_org, "ED", "Paramedic", True),
-        ("dispatcher@mydoctor.test", "ambulance_dispatcher", "Rose", "Namutebi", "+256 701 400 014", hospital_org, "ED", "Ambulance Dispatcher", False),
-        ("reception@mydoctor.test", "receptionist", "Ruth", "Adoch", "+256 701 400 015", hospital_org, "OPD", "Receptionist", False),
-        ("records@mydoctor.test", "records_officer", "Moses", "Ssemanda", "+256 701 400 016", hospital_org, "REC", "Medical Records Officer", False),
-        ("cashier@mydoctor.test", "cashier", "Diana", "Atwine", "+256 701 400 017", hospital_org, "FIN", "Cashier", False),
-        ("accountant@mydoctor.test", "accountant", "Geoffrey", "Byaruhanga", "+256 701 400 018", hospital_org, "FIN", "Accountant", False),
-        ("finance.manager@mydoctor.test", "finance_manager", "Patricia", "Nankya", "+256 701 400 019", hospital_org, "FIN", "Finance Manager", False),
-        ("manager@mydoctor.test", "facility_manager", "Paul", "Kizito", "+256 701 400 020", hospital_org, "OPD", "Facility Manager", False),
-        ("procurement@mydoctor.test", "procurement_officer", "Stephen", "Muwanga", "+256 701 400 021", hospital_org, "PRO", "Procurement Officer", False),
-        ("storekeeper@mydoctor.test", "storekeeper", "John", "Wasswa", "+256 701 400 022", hospital_org, "PRO", "Hospital Storekeeper", False),
-        ("quality@mydoctor.test", "quality_officer", "Agnes", "Nabukenya", "+256 701 400 023", hospital_org, "QAC", "Quality Assurance Officer", False),
-        ("compliance@mydoctor.test", "compliance_officer", "Martin", "Kakooza", "+256 701 400 024", hospital_org, "QAC", "Data Protection Officer", False),
-        ("hr@mydoctor.test", "hr_officer", "Sharon", "Nabasa", "+256 701 400 025", hospital_org, "HR", "Human Resources Officer", False),
-        ("it@mydoctor.test", "it_support", "Ronald", "Mwesigwa", "+256 701 400 026", hospital_org, "IT", "IT Support Officer", False),
-        ("pharmacist.staff@mydoctor.test", "pharmacist", "Irene", "Namuli", "+256 701 500 001", pharmacy_org, "PHA", "Pharmacist", True),
-        ("pharmacy.store@mydoctor.test", "storekeeper", "Isaac", "Kintu", "+256 701 500 002", pharmacy_org, "PST", "Pharmacy Storekeeper", False),
-        ("pharmacy.procurement@mydoctor.test", "procurement_officer", "Mercy", "Atukunda", "+256 701 500 003", pharmacy_org, "PST", "Pharmacy Procurement Officer", False),
-        ("labtech@mydoctor.test", "lab_technician", "Kevin", "Otim", "+256 701 600 001", lab_org, "LAB", "Laboratory Technologist", True),
-        ("phlebotomist@mydoctor.test", "lab_technician", "Mercy", "Aciro", "+256 701 600 002", lab_org, "COL", "Phlebotomist", True),
-        ("insurance.officer@mydoctor.test", "insurance_officer", "Hellen", "Nakirya", "+256 701 700 001", insurer_org, "ELG", "Insurance Officer", False),
-        ("claims@mydoctor.test", "claims_reviewer", "Andrew", "Kasaija", "+256 701 700 002", insurer_org, "CLM", "Claims Reviewer", False),
+        ("clinical.officer@healthpilot.test", "clinical_officer", "Daniel", "Mugisha", "+256 701 400 001", hospital_org, "OPD", "Senior Clinical Officer", True),
+        ("dentist@healthpilot.test", "dentist", "Lydia", "Nabwire", "+256 701 400 002", hospital_org, "OPD", "Dental Surgeon", True),
+        ("medical.director@healthpilot.test", "medical_director", "Peter", "Ouma", "+256 701 400 003", hospital_org, "OPD", "Medical Director", True),
+        ("nurse@healthpilot.test", "nurse", "Esther", "Nabirye", "+256 701 400 004", hospital_org, "NUR", "Registered Nurse", True),
+        ("midwife@healthpilot.test", "midwife", "Rebecca", "Nalukenge", "+256 701 400 005", hospital_org, "MAT", "Registered Midwife", True),
+        ("theatre.nurse@healthpilot.test", "theatre_nurse", "Martha", "Akello", "+256 701 400 006", hospital_org, "THR", "Theatre Nurse", True),
+        ("anaesthetist@healthpilot.test", "anaesthetist", "Michael", "Obote", "+256 701 400 007", hospital_org, "THR", "Anaesthetist", True),
+        ("radiologist@healthpilot.test", "radiologist", "Christine", "Namara", "+256 701 400 008", hospital_org, "RAD", "Consultant Radiologist", True),
+        ("radiographer@healthpilot.test", "radiographer", "Alex", "Tumwine", "+256 701 400 009", hospital_org, "RAD", "Radiographer", True),
+        ("physio@healthpilot.test", "physiotherapist", "Anita", "Kiconco", "+256 701 400 010", hospital_org, "PHY", "Physiotherapist", True),
+        ("nutrition@healthpilot.test", "nutritionist", "Brenda", "Auma", "+256 701 400 011", hospital_org, "NUT", "Clinical Nutritionist", True),
+        ("psychology@healthpilot.test", "psychologist", "David", "Ssemakula", "+256 701 400 012", hospital_org, "PSY", "Clinical Psychologist", True),
+        ("paramedic@healthpilot.test", "paramedic", "Ivan", "Ocen", "+256 701 400 013", hospital_org, "ED", "Paramedic", True),
+        ("dispatcher@healthpilot.test", "ambulance_dispatcher", "Rose", "Namutebi", "+256 701 400 014", hospital_org, "ED", "Ambulance Dispatcher", False),
+        ("reception@healthpilot.test", "receptionist", "Ruth", "Adoch", "+256 701 400 015", hospital_org, "OPD", "Receptionist", False),
+        ("records@healthpilot.test", "records_officer", "Moses", "Ssemanda", "+256 701 400 016", hospital_org, "REC", "Medical Records Officer", False),
+        ("cashier@healthpilot.test", "cashier", "Diana", "Atwine", "+256 701 400 017", hospital_org, "FIN", "Cashier", False),
+        ("accountant@healthpilot.test", "accountant", "Geoffrey", "Byaruhanga", "+256 701 400 018", hospital_org, "FIN", "Accountant", False),
+        ("finance.manager@healthpilot.test", "finance_manager", "Patricia", "Nankya", "+256 701 400 019", hospital_org, "FIN", "Finance Manager", False),
+        ("manager@healthpilot.test", "facility_manager", "Paul", "Kizito", "+256 701 400 020", hospital_org, "OPD", "Facility Manager", False),
+        ("procurement@healthpilot.test", "procurement_officer", "Stephen", "Muwanga", "+256 701 400 021", hospital_org, "PRO", "Procurement Officer", False),
+        ("storekeeper@healthpilot.test", "storekeeper", "John", "Wasswa", "+256 701 400 022", hospital_org, "PRO", "Hospital Storekeeper", False),
+        ("quality@healthpilot.test", "quality_officer", "Agnes", "Nabukenya", "+256 701 400 023", hospital_org, "QAC", "Quality Assurance Officer", False),
+        ("compliance@healthpilot.test", "compliance_officer", "Martin", "Kakooza", "+256 701 400 024", hospital_org, "QAC", "Data Protection Officer", False),
+        ("hr@healthpilot.test", "hr_officer", "Sharon", "Nabasa", "+256 701 400 025", hospital_org, "HR", "Human Resources Officer", False),
+        ("it@healthpilot.test", "it_support", "Ronald", "Mwesigwa", "+256 701 400 026", hospital_org, "IT", "IT Support Officer", False),
+        ("pharmacist.staff@healthpilot.test", "pharmacist", "Irene", "Namuli", "+256 701 500 001", pharmacy_org, "PHA", "Pharmacist", True),
+        ("pharmacy.store@healthpilot.test", "storekeeper", "Isaac", "Kintu", "+256 701 500 002", pharmacy_org, "PST", "Pharmacy Storekeeper", False),
+        ("pharmacy.procurement@healthpilot.test", "procurement_officer", "Mercy", "Atukunda", "+256 701 500 003", pharmacy_org, "PST", "Pharmacy Procurement Officer", False),
+        ("labtech@healthpilot.test", "lab_technician", "Kevin", "Otim", "+256 701 600 001", lab_org, "LAB", "Laboratory Technologist", True),
+        ("phlebotomist@healthpilot.test", "lab_technician", "Mercy", "Aciro", "+256 701 600 002", lab_org, "COL", "Phlebotomist", True),
+        ("insurance.officer@healthpilot.test", "insurance_officer", "Hellen", "Nakirya", "+256 701 700 001", insurer_org, "ELG", "Insurance Officer", False),
+        ("claims@healthpilot.test", "claims_reviewer", "Andrew", "Kasaija", "+256 701 700 002", insurer_org, "CLM", "Claims Reviewer", False),
     ]
     staff_users = {}
     for index, (email, role, first, last, phone, organization, dept_code, title, professional) in enumerate(staff_specs, start=1):
@@ -627,7 +627,7 @@ def run():
         ("cbc", "Complete blood count", "laboratory", ["FBC", "CBC"]),
     ]:
         TerminologyConcept.objects.update_or_create(
-            system="urn:mydoctor:local:observation",
+            system="urn:healthpilot:local:observation",
             version="1",
             code=code,
             defaults={"display": display, "category": category, "aliases": aliases, "active": True},
@@ -764,7 +764,7 @@ def run():
             "active": True,
             "effective_from": TODAY - dt.timedelta(days=120),
             "expires_on": TODAY + dt.timedelta(days=245),
-            "employer_or_group": "MyDoctor Demonstration Group",
+            "employer_or_group": "HealthPilot Demonstration Group",
             "verified_at": NOW - dt.timedelta(days=3),
         },
     )
@@ -1110,7 +1110,7 @@ def run():
                 "quantity": received,
                 "balance_after": available,
                 "reason": "Initial demonstration goods received note",
-                "created_by": staff_users["storekeeper@mydoctor.test"],
+                "created_by": staff_users["storekeeper@healthpilot.test"],
             },
         )
         inventory_items.append(item)
@@ -1122,7 +1122,7 @@ def run():
             "supplier_contact": "+256 700 222 333",
             "expected_on": TODAY + dt.timedelta(days=4),
             "notes": "Routine replenishment of essential medicines and consumables.",
-            "created_by": staff_users["procurement@mydoctor.test"],
+            "created_by": staff_users["procurement@healthpilot.test"],
         },
     )
     for item, quantity in [(inventory_items[0], 500), (inventory_items[3], 1000)]:
@@ -1146,7 +1146,7 @@ def run():
             "specimen_id": "SPM-DEMO-0001",
             "specimen_type": "EDTA blood",
             "collection_notes": "Specimen intact and correctly labelled.",
-            "collected_by": staff_users["labtech@mydoctor.test"],
+            "collected_by": staff_users["labtech@healthpilot.test"],
             "collected_at": NOW - dt.timedelta(hours=3),
             "received_at": NOW - dt.timedelta(hours=2, minutes=45),
             "released_at": NOW - dt.timedelta(minutes=30),
@@ -1160,17 +1160,17 @@ def run():
         code="HB",
         name="Haemoglobin",
         defaults={
-            "code_system": "urn:mydoctor:local:lab",
+            "code_system": "urn:healthpilot:local:lab",
             "value_numeric": Decimal("12.4000"),
             "unit": "g/dL",
             "reference_low": Decimal("12.0000"),
             "reference_high": Decimal("16.0000"),
             "interpretation": LabResult.Interpretation.NORMAL,
             "status": LabResult.Status.FINAL,
-            "entered_by": staff_users["labtech@mydoctor.test"],
-            "verified_by": staff_users["labtech@mydoctor.test"],
+            "entered_by": staff_users["labtech@healthpilot.test"],
+            "verified_by": staff_users["labtech@healthpilot.test"],
             "verified_at": NOW - dt.timedelta(minutes=45),
-            "released_by": staff_users["labtech@mydoctor.test"],
+            "released_by": staff_users["labtech@healthpilot.test"],
             "released_at": NOW - dt.timedelta(minutes=30),
         },
     )
@@ -1185,7 +1185,7 @@ def run():
             "priority": LabOrder.Priority.STAT,
             "specimen_id": "SPM-DEMO-0002",
             "specimen_type": "Fluoride blood",
-            "collected_by": staff_users["labtech@mydoctor.test"],
+            "collected_by": staff_users["labtech@healthpilot.test"],
             "collected_at": NOW - dt.timedelta(hours=1),
             "received_at": NOW - dt.timedelta(minutes=50),
             "result_released": True,
@@ -1204,10 +1204,10 @@ def run():
             "reference_high": Decimal("6.1000"),
             "interpretation": LabResult.Interpretation.CRITICAL,
             "status": LabResult.Status.FINAL,
-            "entered_by": staff_users["labtech@mydoctor.test"],
-            "verified_by": staff_users["labtech@mydoctor.test"],
+            "entered_by": staff_users["labtech@healthpilot.test"],
+            "verified_by": staff_users["labtech@healthpilot.test"],
             "verified_at": NOW - dt.timedelta(minutes=15),
-            "released_by": staff_users["labtech@mydoctor.test"],
+            "released_by": staff_users["labtech@healthpilot.test"],
             "released_at": NOW - dt.timedelta(minutes=10),
         },
     )
@@ -1229,7 +1229,7 @@ def run():
                 defaults={
                     "location": location,
                     "notes": f"Demonstration specimen {event_type} event.",
-                    "performed_by": staff_users["labtech@mydoctor.test"],
+                    "performed_by": staff_users["labtech@healthpilot.test"],
                     "occurred_at": NOW - dt.timedelta(minutes=offset),
                 },
             )
@@ -1553,7 +1553,7 @@ def run():
     )
     Notification.objects.get_or_create(
         user=p1,
-        title="Welcome to your complete MyDoctor demo",
+        title="Welcome to your complete HealthPilot demo",
         defaults={
             "body": "Your dashboard contains a confirmed appointment, paid invoice, receipt, released laboratory result and subscription.",
             "kind": "general",
@@ -1584,7 +1584,7 @@ def run():
     if missing_demo_accounts:
         raise RuntimeError("Seed did not create active accounts for: " + ", ".join(missing_demo_accounts))
 
-    log(f"created/updated {User.objects.filter(email__endswith='@mydoctor.test').count()} demo users")
+    log(f"created/updated {User.objects.filter(email__endswith='@healthpilot.test').count()} demo users")
     log("demo workflows include appointments, triage, admission, emergency, ambulance, imaging, theatre, maternity, lab, pharmacy, billing, insurance, stock, subscriptions, workforce and compliance")
     log(f"standard password: {DEMO_PASSWORD}; admin password: {ADMIN_PASSWORD}")
 

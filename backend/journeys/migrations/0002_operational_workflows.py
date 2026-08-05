@@ -1,4 +1,4 @@
-# Generated for MyDoctor workflow completion release.
+# Generated for HealthPilot workflow completion release.
 from django.conf import settings
 from django.db import migrations, models
 import django.db.models.deletion

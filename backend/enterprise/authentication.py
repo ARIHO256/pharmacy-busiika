@@ -14,7 +14,7 @@ class PartnerTokenPrincipal:
         self.is_authenticated = True
         self.is_anonymous = False
         self.role = "partner_application"
-        self.email = f"{token.application.client_id}@partner.mydoctor"
+        self.email = f"{token.application.client_id}@partner.healthpilot"
         self.id = token.subject_id or 0
 
     @property

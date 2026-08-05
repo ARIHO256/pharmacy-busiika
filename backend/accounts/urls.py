@@ -2,8 +2,9 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
-    ChangePasswordView, ForgotPasswordView, MeView, MfaVerifyView, MyProfileView,
-    MySecurityEventsView, RegisterView, RequestEmailVerificationView, ResetPasswordView,
+    ChangePasswordView, ForgotPasswordView, GoogleLoginView, MeView, MfaVerifyView,
+    MyProfileView, MySecurityEventsView, PhoneLoginRequestView, PhoneLoginVerifyView,
+    RegisterView, RequestEmailVerificationView, ResetPasswordView,
     SecureTokenView, SecuritySettingsView, VerifyEmailView, RequestPhoneVerificationView,
     VerifyPhoneView, LogoutView, SessionListRevokeView,
     DependentListCreateView, DependentDetailView, PatientRelationshipActionView,
@@ -18,6 +19,9 @@ urlpatterns = [
     path("email-verification/verify/", VerifyEmailView.as_view(), name="email_verification_verify"),
     path("phone-verification/request/", RequestPhoneVerificationView.as_view(), name="phone_verification_request"),
     path("phone-verification/verify/", VerifyPhoneView.as_view(), name="phone_verification_verify"),
+    path("phone-login/request/", PhoneLoginRequestView.as_view(), name="phone_login_request"),
+    path("phone-login/verify/", PhoneLoginVerifyView.as_view(), name="phone_login_verify"),
+    path("google/", GoogleLoginView.as_view(), name="google_login"),
     path("logout/", LogoutView.as_view(), name="logout"),
     path("sessions/", SessionListRevokeView.as_view(), name="sessions"),
     path("password/forgot/", ForgotPasswordView.as_view(), name="password_forgot"),

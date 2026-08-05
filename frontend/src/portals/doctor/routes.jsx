@@ -16,6 +16,7 @@ import Referrals from './Referrals'
 import RecordWorkspace from '../enterprise/RecordWorkspace'
 import MedicationSafetyWorkbench from '../enterprise/MedicationSafetyWorkbench'
 import { DOCTOR_EMERGENCY, DOCTOR_INPATIENT, DOCTOR_LAB_SPECIALTY, DOCTOR_MATERNITY, DOCTOR_PHARMACY_SAFETY, DOCTOR_THEATRE } from '../enterprise/coreModules'
+import TeamSchedule from '../staff/TeamSchedule'
 
 export const nav = [
   { to: '/doctor', label: 'Clinical Home', icon: 'dashboard', end: true, group: 'Overview', description: 'Today, alerts and performance' },
@@ -40,6 +41,7 @@ export const nav = [
   { to: '/doctor/support', label: 'Support Centre', icon: 'help', group: 'Settings', description: 'Clinical workflow and account support' },
   { to: '/doctor/profile', label: 'Professional Profile', icon: 'doctor', group: 'Settings', description: 'Credentials, services, fees and facilities' },
 
+  { to: '/doctor/team-schedule', label: 'Team Schedule', icon: 'calendar', group: 'Scheduling', description: 'Upcoming appointments for every provider in your organization' },
   ...deepNav('doctor', 'doctor', { label: 'Complete page centre', group: 'Professional tools' }),
 ]
 
@@ -66,5 +68,6 @@ export const routes = [
   { path: 'earnings', element: <Earnings /> },
   { path: 'profile', element: <Profile /> },
 
+  { path: 'team-schedule', element: <TeamSchedule /> },
   ...deepRoutes('doctor', 'doctor', { title: 'Doctor clinical page centre' }),
 ]

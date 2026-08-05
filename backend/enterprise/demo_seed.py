@@ -30,24 +30,24 @@ NOW = timezone.now()
 TODAY = timezone.localdate()
 
 ROLE_EMAIL = {
-    "admin": "admin@mydoctor.test", "patient": "patient1@mydoctor.test", "doctor": "dr.nakato@mydoctor.test",
-    "clinical_officer": "clinical.officer@mydoctor.test", "dentist": "dentist@mydoctor.test",
-    "medical_director": "medical.director@mydoctor.test", "nurse": "nurse@mydoctor.test",
-    "midwife": "midwife@mydoctor.test", "theatre_nurse": "theatre.nurse@mydoctor.test",
-    "anaesthetist": "anaesthetist@mydoctor.test", "radiologist": "radiologist@mydoctor.test",
-    "radiographer": "radiographer@mydoctor.test", "physiotherapist": "physio@mydoctor.test",
-    "nutritionist": "nutrition@mydoctor.test", "psychologist": "psychology@mydoctor.test",
-    "paramedic": "paramedic@mydoctor.test", "ambulance_dispatcher": "dispatcher@mydoctor.test",
-    "receptionist": "reception@mydoctor.test", "records_officer": "records@mydoctor.test",
-    "cashier": "cashier@mydoctor.test", "accountant": "accountant@mydoctor.test",
-    "finance_manager": "finance.manager@mydoctor.test", "facility_manager": "manager@mydoctor.test",
-    "procurement_officer": "procurement@mydoctor.test", "storekeeper": "storekeeper@mydoctor.test",
-    "quality_officer": "quality@mydoctor.test", "compliance_officer": "compliance@mydoctor.test",
-    "hr_officer": "hr@mydoctor.test", "it_support": "it@mydoctor.test",
-    "pharmacist": "pharmacist.staff@mydoctor.test", "lab_technician": "labtech@mydoctor.test",
-    "insurance_officer": "insurance.officer@mydoctor.test", "claims_reviewer": "claims@mydoctor.test",
-    "hospital": "hospital@mydoctor.test", "pharmacy": "pharmacy@mydoctor.test",
-    "lab": "lab@mydoctor.test", "insurance": "insurance@mydoctor.test",
+    "admin": "admin@healthpilot.test", "patient": "patient1@healthpilot.test", "doctor": "dr.nakato@healthpilot.test",
+    "clinical_officer": "clinical.officer@healthpilot.test", "dentist": "dentist@healthpilot.test",
+    "medical_director": "medical.director@healthpilot.test", "nurse": "nurse@healthpilot.test",
+    "midwife": "midwife@healthpilot.test", "theatre_nurse": "theatre.nurse@healthpilot.test",
+    "anaesthetist": "anaesthetist@healthpilot.test", "radiologist": "radiologist@healthpilot.test",
+    "radiographer": "radiographer@healthpilot.test", "physiotherapist": "physio@healthpilot.test",
+    "nutritionist": "nutrition@healthpilot.test", "psychologist": "psychology@healthpilot.test",
+    "paramedic": "paramedic@healthpilot.test", "ambulance_dispatcher": "dispatcher@healthpilot.test",
+    "receptionist": "reception@healthpilot.test", "records_officer": "records@healthpilot.test",
+    "cashier": "cashier@healthpilot.test", "accountant": "accountant@healthpilot.test",
+    "finance_manager": "finance.manager@healthpilot.test", "facility_manager": "manager@healthpilot.test",
+    "procurement_officer": "procurement@healthpilot.test", "storekeeper": "storekeeper@healthpilot.test",
+    "quality_officer": "quality@healthpilot.test", "compliance_officer": "compliance@healthpilot.test",
+    "hr_officer": "hr@healthpilot.test", "it_support": "it@healthpilot.test",
+    "pharmacist": "pharmacist.staff@healthpilot.test", "lab_technician": "labtech@healthpilot.test",
+    "insurance_officer": "insurance.officer@healthpilot.test", "claims_reviewer": "claims@healthpilot.test",
+    "hospital": "hospital@healthpilot.test", "pharmacy": "pharmacy@healthpilot.test",
+    "lab": "lab@healthpilot.test", "insurance": "insurance@healthpilot.test",
 }
 
 
@@ -76,7 +76,7 @@ def demo_value(name, spec, index=1):
     if "reference" in name: return f"DEMO-{index:04d}"
     if "number" in name: return f"NUM-{index:04d}"
     if "status" in name: return "stable"
-    if "email" in name: return "demo@mydoctor.test"
+    if "email" in name: return "demo@healthpilot.test"
     if "phone" in name: return "+256700000001"
     return f"Demonstration {spec['label'].lower()}"
 
@@ -99,7 +99,7 @@ def seed_enterprise_demo():
     appointment = Appointment.objects.filter(patient=patient).first() if patient else None
 
     # 1-2. Multi-role contexts and dedicated workspaces.
-    for user in User.objects.filter(email__endswith="@mydoctor.test"):
+    for user in User.objects.filter(email__endswith="@healthpilot.test"):
         membership = StaffMembership.objects.filter(user=user, status="active").select_related("organization", "department").first()
         org = membership.organization if membership else ({"hospital": hospital, "pharmacy": pharmacy, "lab": lab, "insurance": insurer}.get(user.role))
         department = membership.department if membership else None
@@ -184,7 +184,7 @@ def seed_enterprise_demo():
             for index in range(8)
         ],
         "ambulance_telemetry": [
-            {"latitude": 0.315 + index * 0.004, "longitude": 32.56 + index * 0.003, "speed_kph": 36 + index * 3, "heading": 45 + index * 8, "pickup_location": "Kampala emergency zone", "destination": "MyDoctor General Hospital"}
+            {"latitude": 0.315 + index * 0.004, "longitude": 32.56 + index * 0.003, "speed_kph": 36 + index * 3, "heading": 45 + index * 8, "pickup_location": "Kampala emergency zone", "destination": "HealthPilot General Hospital"}
             for index in range(10)
         ],
         "medication_dose": [
@@ -247,7 +247,7 @@ def seed_enterprise_demo():
 
     # 8. PACS/DICOM and imaging study data.
     if hospital and patient:
-        pacs, _ = PACSNode.objects.update_or_create(organization=hospital, ae_title="MYDOCTORPACS", defaults={"name": "MyDoctor Demo PACS", "host": "orthanc", "port": 4242, "dicomweb_base_url": "http://orthanc:8042/dicom-web", "tls_enabled": False, "active": True, "configuration": {"viewer": "ohif"}})
+        pacs, _ = PACSNode.objects.update_or_create(organization=hospital, ae_title="HEALTHPILOTPACS", defaults={"name": "HealthPilot Demo PACS", "host": "orthanc", "port": 4242, "dicomweb_base_url": "http://orthanc:8042/dicom-web", "tls_enabled": False, "active": True, "configuration": {"viewer": "ohif"}})
         imaging_order = ImagingOrder.objects.filter(patient=patient).first() or ImagingOrder.objects.first()
         ImagingStudy.objects.update_or_create(study_instance_uid="1.2.826.0.1.3680043.10.2026.1", defaults={"organization": hospital, "patient": patient, "imaging_order": imaging_order, "pacs_node": pacs, "accession_number": "ACC-DEMO-0001", "modality": "DX", "description": "Demo chest radiograph", "study_date": NOW - timedelta(hours=2), "series_count": 1, "instance_count": 2, "viewer_url": "http://localhost:3000/viewer/1.2.826.0.1.3680043.10.2026.1", "metadata": {"bodyPartExamined": "CHEST"}})
 
@@ -260,7 +260,7 @@ def seed_enterprise_demo():
 
     # 13. Provider routing, consent and escalation.
     for channel, name, ptype, priority in [("email", "SMTP Primary", "webhook", 10), ("sms", "Africa's Talking Primary", "africastalking", 10), ("sms", "SMS Failover Webhook", "webhook", 20), ("whatsapp", "Meta WhatsApp", "meta", 10), ("push", "Firebase Cloud Messaging", "fcm", 10)]:
-        NotificationProvider.objects.update_or_create(channel=channel, name=name, defaults={"provider_type": ptype, "priority": priority, "active": False, "credentials_reference": f"DEMO_{channel.upper()}_TOKEN", "configuration": {"url": "https://example.invalid/notifications", "sender": "MyDoctor"}, "cost_per_message": Decimal("50.0000") if channel == "sms" else Decimal("0.0000"), "currency": "UGX", "health_status": "not_configured"})
+        NotificationProvider.objects.update_or_create(channel=channel, name=name, defaults={"provider_type": ptype, "priority": priority, "active": False, "credentials_reference": f"DEMO_{channel.upper()}_TOKEN", "configuration": {"url": "https://example.invalid/notifications", "sender": "HealthPilot"}, "cost_per_message": Decimal("50.0000") if channel == "sms" else Decimal("0.0000"), "currency": "UGX", "health_status": "not_configured"})
     if patient:
         for channel in ["email", "sms", "whatsapp", "push"]:
             CommunicationConsent.objects.update_or_create(user=patient, channel=channel, purpose="care_delivery", defaults={"granted": True, "source": "demo_registration", "evidence": {"seed": True}})
@@ -280,7 +280,7 @@ def seed_enterprise_demo():
         ("banner", "connected-care-hero", "Connected care for every stage of life", "Book verified professionals, receive results and manage care in one secure platform.", "home.hero"),
         ("promotion", "family-health-check", "Family health check package", "A coordinated consultation, laboratory screening and follow-up package.", "home.promotion"),
         ("faq", "how-verification-works", "How are professionals verified?", "Professional credentials are reviewed by administrators and may be pre-screened by automated verification tools.", "support.faq"),
-        ("legal", "privacy-notice", "MyDoctor privacy notice", "Demonstration privacy content. Replace with jurisdiction-approved legal content before production use.", "legal"),
+        ("legal", "privacy-notice", "HealthPilot privacy notice", "Demonstration privacy content. Replace with jurisdiction-approved legal content before production use.", "legal"),
     ]
     for ctype, slug, title, body, placement in content_rows:
         ContentEntry.objects.update_or_create(content_type=ctype, slug=slug, locale="en-UG", version=1, defaults={"title": title, "summary": body[:120], "body": body, "target_url": "/register" if ctype in {"banner", "promotion"} else "", "audience": ["all"], "placement": placement, "status": "published", "published_at": NOW, "created_by": admin, "metadata": {"seed": True}})
@@ -297,7 +297,7 @@ def seed_enterprise_demo():
     mpi_rows = []
     for index, p in enumerate(User.objects.filter(role="patient").order_by("id")[:5], start=1):
         profile = getattr(p, "patient_profile", None)
-        mpi, _ = MasterPatientIndex.objects.update_or_create(patient=p, defaults={"national_identifier": f"DEMO-NIN-{index:04d}", "identifiers": [{"system": "urn:mydoctor:demo:nin", "value": f"DEMO-NIN-{index:04d}"}], "normalized_name": p.display_name.lower(), "normalized_phone": p.phone.replace(" ", ""), "date_of_birth": getattr(profile, "dob", None), "sex": getattr(profile, "gender", ""), "status": "active", "confidence_score": Decimal("100.00")})
+        mpi, _ = MasterPatientIndex.objects.update_or_create(patient=p, defaults={"national_identifier": f"DEMO-NIN-{index:04d}", "identifiers": [{"system": "urn:healthpilot:demo:nin", "value": f"DEMO-NIN-{index:04d}"}], "normalized_name": p.display_name.lower(), "normalized_phone": p.phone.replace(" ", ""), "date_of_birth": getattr(profile, "dob", None), "sex": getattr(profile, "gender", ""), "status": "active", "confidence_score": Decimal("100.00")})
         mpi_rows.append(mpi)
     if len(mpi_rows) > 1:
         DuplicatePatientCandidate.objects.update_or_create(patient_a=mpi_rows[0], patient_b=mpi_rows[1], defaults={"score": Decimal("62.50"), "matching_fields": ["similar_name", "shared_phone_prefix"], "status": "pending", "notes": "Demonstration candidate for records-officer review."})
@@ -306,8 +306,8 @@ def seed_enterprise_demo():
 
     # 17. FHIR resources, partner app and subscription.
     if patient:
-        fhir_patient, _ = FHIRResource.objects.update_or_create(resource_type="Patient", logical_id=uuid.uuid5(uuid.NAMESPACE_URL, f"mydoctor-patient-{patient.id}"), version_id=1, defaults={"patient": patient, "organization": hospital, "source_model": "accounts.User", "source_id": str(patient.id), "data": {"resourceType": "Patient", "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"mydoctor-patient-{patient.id}")), "identifier": [{"system": "urn:mydoctor:patient", "value": str(patient.id)}], "name": [{"use": "official", "text": patient.display_name}], "telecom": [{"system": "phone", "value": patient.phone}, {"system": "email", "value": patient.email}]}, "status": "active"})
-        FHIRResource.objects.update_or_create(resource_type="Observation", logical_id=uuid.uuid5(uuid.NAMESPACE_URL, f"mydoctor-observation-{patient.id}"), version_id=1, defaults={"patient": patient, "organization": hospital, "source_model": "enterprise.EnterpriseRecord", "source_id": "demo", "data": {"resourceType": "Observation", "status": "final", "code": {"coding": [{"system": "http://loinc.org", "code": "8310-5", "display": "Body temperature"}]}, "subject": {"reference": f"Patient/{fhir_patient.logical_id}"}, "valueQuantity": {"value": 36.8, "unit": "Cel"}}, "status": "active"})
+        fhir_patient, _ = FHIRResource.objects.update_or_create(resource_type="Patient", logical_id=uuid.uuid5(uuid.NAMESPACE_URL, f"healthpilot-patient-{patient.id}"), version_id=1, defaults={"patient": patient, "organization": hospital, "source_model": "accounts.User", "source_id": str(patient.id), "data": {"resourceType": "Patient", "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"healthpilot-patient-{patient.id}")), "identifier": [{"system": "urn:healthpilot:patient", "value": str(patient.id)}], "name": [{"use": "official", "text": patient.display_name}], "telecom": [{"system": "phone", "value": patient.phone}, {"system": "email", "value": patient.email}]}, "status": "active"})
+        FHIRResource.objects.update_or_create(resource_type="Observation", logical_id=uuid.uuid5(uuid.NAMESPACE_URL, f"healthpilot-observation-{patient.id}"), version_id=1, defaults={"patient": patient, "organization": hospital, "source_model": "enterprise.EnterpriseRecord", "source_id": "demo", "data": {"resourceType": "Observation", "status": "final", "code": {"coding": [{"system": "http://loinc.org", "code": "8310-5", "display": "Body temperature"}]}, "subject": {"reference": f"Patient/{fhir_patient.logical_id}"}, "valueQuantity": {"value": 36.8, "unit": "Cel"}}, "status": "active"})
     partner, _ = PartnerApplication.objects.update_or_create(name="Demo National HIE Adapter", defaults={"organization": hospital, "redirect_uris": ["https://example.invalid/oauth/callback"], "scopes": ["patient/*.read", "Observation.read", "DiagnosticReport.read"], "jwks_uri": "", "active": False})
     FHIRSubscription.objects.update_or_create(application=partner, criteria="Observation?status=final", endpoint="https://example.invalid/fhir-events", defaults={"payload_type": "application/fhir+json", "secret_reference": "DEMO_FHIR_SUBSCRIPTION_SECRET", "status": "off"})
 
@@ -339,7 +339,7 @@ def seed_enterprise_demo():
         ]
         for index, (name, domain, definition) in enumerate(report_specs, start=1):
             report, _ = SavedReport.objects.update_or_create(organization=hospital, name=name, defaults={"domain": domain, "definition": definition, "visibility": "organization", "created_by": admin})
-            ReportSchedule.objects.update_or_create(report=report, cron_expression="0 7 * * 1", defaults={"recipients": ["manager@mydoctor.test"], "formats": ["csv", "pdf"], "active": True, "next_run_at": NOW + timedelta(days=7), "created_by": admin})
+            ReportSchedule.objects.update_or_create(report=report, cron_expression="0 7 * * 1", defaults={"recipients": ["manager@healthpilot.test"], "formats": ["csv", "pdf"], "active": True, "next_run_at": NOW + timedelta(days=7), "created_by": admin})
 
     return {
         "role_contexts": RoleContext.objects.count(),

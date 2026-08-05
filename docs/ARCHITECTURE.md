@@ -1,8 +1,8 @@
-# MyDoctor HealthOS Architecture
+# HealthPilot HealthOS Architecture
 
 ## 1. Architecture objective
 
-MyDoctor is structured as a connected-care platform rather than a single booking application. The codebase deliberately separates replaceable user experiences from durable clinical, governance, registry and financial records.
+HealthPilot is structured as a connected-care platform rather than a single booking application. The codebase deliberately separates replaceable user experiences from durable clinical, governance, registry and financial records.
 
 The present implementation uses a **modular Django monolith**. This is intentional: transactional consistency, simpler deployment and clear domain boundaries are more valuable at this stage than premature microservices. Modules may later be extracted only when scale, security boundaries, independent deployment or team ownership justify it.
 

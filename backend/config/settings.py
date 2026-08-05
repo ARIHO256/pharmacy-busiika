@@ -48,6 +48,9 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    # daphne must precede staticfiles so its ASGI runserver override wins in development.
+    "daphne",
+    "channels",
     "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_simplejwt",
@@ -70,7 +73,6 @@ INSTALLED_APPS = [
     "interoperability",
     "workforce",
     "operations",
-    "channels",
     "enterprise.apps.EnterpriseConfig",
     "journeys.apps.JourneysConfig",
 ]
@@ -193,7 +195,7 @@ CSRF_TRUSTED_ORIGINS = env_list(
 
 
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "MyDoctor <no-reply@mydoctor.local>")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "HealthPilot <no-reply@healthpilot.local>")
 EMAIL_HOST = os.getenv("EMAIL_HOST", "")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
@@ -224,6 +226,9 @@ PASSWORD_RESET_MINUTES = int(os.getenv("PASSWORD_RESET_MINUTES", "30"))
 MFA_CODE_MINUTES = int(os.getenv("MFA_CODE_MINUTES", "10"))
 PHONE_VERIFICATION_MINUTES = int(os.getenv("PHONE_VERIFICATION_MINUTES", "10"))
 
+# Google social sign-in. Leave empty to disable POST /api/auth/google/.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+
 NOTIFICATION_CALLBACK_SECRET = os.getenv("NOTIFICATION_CALLBACK_SECRET", "")
 METRICS_TOKEN = os.getenv("METRICS_TOKEN", "")
 CLAMAV_ENABLED = env_bool("CLAMAV_ENABLED", False)
@@ -249,14 +254,14 @@ else:
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "mydoctor-local-cache",
+            "LOCATION": "healthpilot-local-cache",
         }
     }
 
 
 # OpenAPI documentation. Disable the public schema UI at the edge if not needed.
 SPECTACULAR_SETTINGS = {
-    "TITLE": "MyDoctor Healthcare Platform API",
+    "TITLE": "HealthPilot Healthcare Platform API",
     "DESCRIPTION": "Role-scoped APIs for patient care, provider verification, hospital operations, diagnostics, pharmacy, billing and administration.",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
@@ -303,6 +308,14 @@ CELERY_BEAT_SCHEDULE = {
     "appointment-reminders-every-15-minutes": {
         "task": "appointments.tasks.send_scheduled_appointment_reminders",
         "schedule": 900.0,
+    },
+    "appointment-no-show-hourly": {
+        "task": "appointments.tasks.mark_no_show_appointments",
+        "schedule": 3600.0,
+    },
+    "follow-up-recalls-daily": {
+        "task": "clinical.tasks.send_follow_up_recalls",
+        "schedule": 86400.0,
     },
     "credential-expiry-daily": {
         "task": "registry.tasks.notify_credential_expiry",
@@ -372,6 +385,6 @@ LOGGING = {
     "root": {"handlers": ["console"], "level": LOG_LEVEL},
     "loggers": {
         "django.request": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
-        "mydoctor": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
+        "healthpilot": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
     },
 }

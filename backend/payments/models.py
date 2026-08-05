@@ -22,11 +22,20 @@ class Invoice(models.Model):
         MOBILE_MONEY = "mobile_money", "Mobile money"
         CARD = "card", "Card"
         BANK = "bank", "Bank transfer"
+        WALLET = "wallet", "Wallet"
         INSURANCE = "insurance", "Insurance"
         FLUTTERWAVE = "flutterwave", "Flutterwave"
         PAYSTACK = "paystack", "Paystack"
         MTN_MOMO = "mtn_momo", "MTN Mobile Money"
         AIRTEL_MONEY = "airtel_money", "Airtel Money"
+
+    class SourceType(models.TextChoices):
+        APPOINTMENT = "appointment", "Appointment"
+        ORDER = "order", "Pharmacy order"
+        LAB_ORDER = "lab_order", "Lab order"
+        HOSPITAL_BOOKING = "hospital_booking", "Hospital booking"
+        SUBSCRIPTION = "subscription", "Subscription"
+        WALLET_TOPUP = "wallet_topup", "Wallet top-up"
 
     number = models.CharField(max_length=30, unique=True, blank=True)
     patient = models.ForeignKey(
@@ -48,6 +57,10 @@ class Invoice(models.Model):
         blank=True,
         related_name="invoices",
     )
+    source_type = models.CharField(
+        max_length=24, choices=SourceType.choices, blank=True, default=""
+    )
+    source_id = models.CharField(max_length=80, blank=True, default="")
     issued_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -77,6 +90,7 @@ class Invoice(models.Model):
         indexes = [
             models.Index(fields=["organization", "status", "created_at"]),
             models.Index(fields=["patient", "status"]),
+            models.Index(fields=["source_type", "source_id"]),
         ]
 
     def save(self, *args, **kwargs):
@@ -233,6 +247,9 @@ class CashierShift(models.Model):
 
 
 class Subscription(models.Model):
+    """Legacy model, superseded by operations.AccountSubscription. Kept for
+    historical rows only; new subscription billing goes through
+    operations.SubscriptionPlan/AccountSubscription."""
     class Plan(models.TextChoices):
         BASIC = "basic", "Basic"
         PREMIUM = "premium", "Premium"
@@ -254,7 +271,13 @@ class Subscription(models.Model):
 class Payout(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
         PAID = "paid", "Paid"
+
+    class Method(models.TextChoices):
+        MOBILE_MONEY = "mobile_money", "Mobile money"
+        BANK = "bank", "Bank transfer"
 
     doctor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -265,6 +288,21 @@ class Payout(models.Model):
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING
     )
+    method = models.CharField(
+        max_length=20, choices=Method.choices, default=Method.MOBILE_MONEY
+    )
+    account_number = models.CharField(max_length=80, blank=True, default="")
+    account_name = models.CharField(max_length=160, blank=True, default="")
+    reference = models.CharField(max_length=140, blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+    processed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="processed_payouts",
+    )
+    processed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -272,6 +310,82 @@ class Payout(models.Model):
 
     def __str__(self):
         return f"Payout {self.pk} to doctor {self.doctor_id} ({self.status})"
+
+
+class WalletAccount(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="wallet_account",
+    )
+    balance = models.PositiveBigIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Wallet of user {self.user_id} ({self.balance})"
+
+
+class WalletTransaction(models.Model):
+    class Direction(models.TextChoices):
+        CREDIT = "credit", "Credit"
+        DEBIT = "debit", "Debit"
+
+    class Kind(models.TextChoices):
+        TOPUP = "topup", "Top-up"
+        PAYMENT = "payment", "Payment"
+        REFUND = "refund", "Refund"
+
+    wallet = models.ForeignKey(
+        WalletAccount, on_delete=models.CASCADE, related_name="transactions"
+    )
+    direction = models.CharField(max_length=10, choices=Direction.choices)
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    amount = models.PositiveBigIntegerField()
+    invoice = models.ForeignKey(
+        Invoice,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="wallet_transactions",
+    )
+    reference = models.CharField(max_length=140, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.direction} {self.amount} ({self.kind})"
+
+
+class CommissionRule(models.Model):
+    """Commission override; a doctor rule wins over an organization rule."""
+
+    doctor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="commission_rules",
+    )
+    organization = models.ForeignKey(
+        "registry.Organization",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="commission_rules",
+    )
+    rate = models.FloatField()
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        target = f"doctor {self.doctor_id}" if self.doctor_id else f"organization {self.organization_id}"
+        return f"Commission {self.rate:.2%} for {target}"
 
 
 class LedgerAccount(models.Model):

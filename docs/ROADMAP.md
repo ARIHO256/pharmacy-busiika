@@ -112,7 +112,7 @@ This roadmap prioritizes safety and durable records before feature volume.
 
 **Exit condition:** secondary use cannot compromise treatment operations or patient rights.
 
-## Phase 8 — Governed MyDoctor Copilot
+## Phase 8 — Governed HealthPilot Copilot
 
 Start only after clinical governance, terminology and data quality are mature.
 

@@ -21,6 +21,7 @@ import MaternityCare from '../operations/MaternityCare'
 import QualityCompliance from '../operations/QualityCompliance'
 import EnterpriseAnalytics from '../operations/EnterpriseAnalytics'
 import NotificationConsole from '../operations/NotificationConsole'
+import TeamSchedule from '../staff/TeamSchedule'
 
 export const nav = [
   { to: '/hospital', label: 'Facility Home', icon: 'dashboard', end: true, group: 'Overview', description: 'Capacity, bookings and service performance' },
@@ -46,6 +47,7 @@ export const nav = [
   { to: '/hospital/support', label: 'Support', icon: 'help', group: 'Settings', description: 'Platform support and issue tracking' },
   { to: '/hospital/profile', label: 'Facility Profile', icon: 'settings', group: 'Settings', description: 'Locations, licences and organisation settings' },
 
+  { to: '/hospital/team-schedule', label: 'Team Schedule', icon: 'calendar', group: 'Operations', description: 'Upcoming appointments for every provider in your organization' },
   ...deepNav('hospital', 'hospital', { label: 'Complete page centre', group: 'Professional tools' }),
 ]
 
@@ -73,5 +75,6 @@ export const routes = [
   { path: 'support', element: <SupportCentre /> },
   { path: 'profile', element: <ProviderProfile /> },
 
+  { path: 'team-schedule', element: <TeamSchedule /> },
   ...deepRoutes('hospital', 'hospital', { title: 'Hospital operations page centre' }),
 ]

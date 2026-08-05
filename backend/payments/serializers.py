@@ -5,12 +5,14 @@ from appointments.models import Appointment
 
 from .models import (
     CashierShift,
+    CommissionRule,
     Invoice,
     InvoiceItem,
     PaymentTransaction,
     Payout,
     Receipt,
     Subscription,
+    WalletTransaction,
 )
 
 
@@ -241,10 +243,84 @@ class CashierShiftSerializer(serializers.ModelSerializer):
 
 
 class PayoutSerializer(serializers.ModelSerializer):
+    doctor_name = serializers.SerializerMethodField()
+    processed_by_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Payout
-        fields = ["id", "doctor", "amount", "status", "created_at"]
-        read_only_fields = ["id", "doctor", "status", "created_at"]
+        fields = [
+            "id",
+            "doctor",
+            "doctor_name",
+            "amount",
+            "status",
+            "method",
+            "account_number",
+            "account_name",
+            "reference",
+            "notes",
+            "processed_by",
+            "processed_by_name",
+            "processed_at",
+            "created_at",
+        ]
+        read_only_fields = ["id", "doctor", "status", "reference", "processed_by", "processed_at", "created_at"]
+
+    def get_doctor_name(self, obj):
+        return _display_name(obj.doctor)
+
+    def get_processed_by_name(self, obj):
+        return _display_name(obj.processed_by)
+
+
+class WalletTransactionSerializer(serializers.ModelSerializer):
+    invoice_number = serializers.CharField(source="invoice.number", read_only=True)
+
+    class Meta:
+        model = WalletTransaction
+        fields = [
+            "id",
+            "direction",
+            "kind",
+            "amount",
+            "invoice",
+            "invoice_number",
+            "reference",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class CommissionRuleSerializer(serializers.ModelSerializer):
+    doctor_name = serializers.SerializerMethodField()
+    organization_name = serializers.CharField(source="organization.legal_name", read_only=True)
+
+    class Meta:
+        model = CommissionRule
+        fields = [
+            "id",
+            "doctor",
+            "doctor_name",
+            "organization",
+            "organization_name",
+            "rate",
+            "active",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+    def get_doctor_name(self, obj):
+        return _display_name(obj.doctor)
+
+    def validate(self, attrs):
+        doctor = attrs.get("doctor", getattr(self.instance, "doctor", None))
+        organization = attrs.get("organization", getattr(self.instance, "organization", None))
+        if not doctor and not organization:
+            raise serializers.ValidationError("A commission rule targets a doctor or an organization.")
+        rate = attrs.get("rate", getattr(self.instance, "rate", None))
+        if rate is not None and not (0 <= rate < 1):
+            raise serializers.ValidationError({"rate": "Rate must be between 0 and 1 (exclusive)."})
+        return attrs
 
 
 class SubscriptionSerializer(serializers.ModelSerializer):

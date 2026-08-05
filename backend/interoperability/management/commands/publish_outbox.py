@@ -113,16 +113,16 @@ class Command(BaseCommand):
 
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "MyDoctor-Outbox/1.0",
+            "User-Agent": "HealthPilot-Outbox/1.0",
             "Idempotency-Key": envelope["event_id"],
-            "X-MyDoctor-Event-Type": envelope["event_type"],
+            "X-HealthPilot-Event-Type": envelope["event_type"],
         }
         token = os.getenv("OUTBOX_WEBHOOK_TOKEN", "").strip()
         if token:
             headers["Authorization"] = f"Bearer {token}"
         signing_secret = os.getenv("OUTBOX_SIGNING_SECRET", "").encode("utf-8")
         if signing_secret:
-            headers["X-MyDoctor-Signature"] = hmac.new(
+            headers["X-HealthPilot-Signature"] = hmac.new(
                 signing_secret, body, hashlib.sha256
             ).hexdigest()
 

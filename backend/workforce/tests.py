@@ -24,7 +24,7 @@ class WorkforceRoleWorkflowTests(TestCase):
         )
         self.organization = Organization.objects.create(
             owner=self.owner,
-            legal_name="MyDoctor General Hospital",
+            legal_name="HealthPilot General Hospital",
             organization_type=Organization.Type.HOSPITAL,
             license_number="HOSP-001",
             status=Organization.Status.VERIFIED,

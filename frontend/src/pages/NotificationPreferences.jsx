@@ -5,7 +5,7 @@ import { Alert, Button, Card, Spinner } from '../components/ui'
 import { useAuth, ROLE_HOME } from '../auth/AuthContext'
 
 const TOGGLES = [
-  ['in_app_enabled', 'In-app notifications', 'Show care, account and billing updates inside MyDoctor.'],
+  ['in_app_enabled', 'In-app notifications', 'Show care, account and billing updates inside HealthPilot.'],
   ['email_enabled', 'Email delivery', 'Send eligible notifications to the verified account email.'],
   ['sms_enabled', 'SMS delivery', 'Send urgent and configured reminders by SMS when an SMS provider is connected.'],
   ['push_enabled', 'Push delivery', 'Prepare mobile or browser push delivery when a push provider is connected.'],

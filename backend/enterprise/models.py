@@ -388,9 +388,14 @@ class MessageReceipt(models.Model):
 
 
 class TelemedicineSession(models.Model):
+    class Mode(models.TextChoices):
+        VIDEO = "video", "Video"
+        AUDIO = "audio", "Audio"
+
     public_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     appointment = models.OneToOneField("appointments.Appointment", null=True, blank=True, on_delete=models.SET_NULL, related_name="enterprise_telemedicine_session")
     provider = models.CharField(max_length=24, default="jitsi")
+    mode = models.CharField(max_length=12, choices=Mode.choices, default=Mode.VIDEO)
     external_id = models.CharField(max_length=180, blank=True, default="")
     join_url = models.URLField(blank=True, default="")
     host_url = models.URLField(blank=True, default="")

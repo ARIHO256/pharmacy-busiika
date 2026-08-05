@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Badge, Button, Card, Select, Spinner, Table } from '../../components/ui'
+import { Link } from 'react-router-dom'
 import { adminApi } from '../../api/endpoints'
 import { fmtDate, profileStatusColor, roleColor, ROLES } from './helpers'
 
@@ -55,7 +56,9 @@ export default function Users() {
     {
       key: 'identity', label: 'User', render: (u) => (
         <div>
-          <div className="font-semibold text-slate-800">{u.name || 'Unnamed user'}</div>
+          <div className="font-semibold text-slate-800">
+            <Link to={`/admin/users/${u.id}`} className="hover:underline">{u.name || 'Unnamed user'}</Link>
+          </div>
           <div className="text-xs text-slate-500">{u.email}</div>
         </div>
       ),

@@ -158,7 +158,7 @@ def main():
     parser.add_argument("--require", action="append", choices=ALL_PROVIDERS)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    env_required = [value.strip() for value in os.getenv("MYDOCTOR_REQUIRED_PROVIDERS", "").split(",") if value.strip()]
+    env_required = [value.strip() for value in os.getenv("HEALTHPILOT_REQUIRED_PROVIDERS", "").split(",") if value.strip()]
     selected = args.require or env_required or list(ALL_PROVIDERS)
     unknown = sorted(set(selected) - set(ALL_PROVIDERS))
     if unknown:
@@ -177,7 +177,7 @@ def main():
                 result["check"] = str(exc)
         if missing or result["connectivity"] != "passed": failed.append(provider)
         results[provider] = result
-    output = {"provider_mode": os.getenv("MYDOCTOR_PROVIDER_MODE", "unset"), "required": selected, "results": results, "passed": not failed}
+    output = {"provider_mode": os.getenv("HEALTHPILOT_PROVIDER_MODE", "unset"), "required": selected, "results": results, "passed": not failed}
     print(json.dumps(output, indent=2))
     if failed:
         print("Provider sandbox acceptance blocked: " + ", ".join(failed), file=sys.stderr); return 1

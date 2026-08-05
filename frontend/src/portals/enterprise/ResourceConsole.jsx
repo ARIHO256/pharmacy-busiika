@@ -12,7 +12,8 @@ function displayValue(row, key) {
   const value = row[key]
   if (value === null || value === undefined || value === '') return '—'
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
-  if (typeof value === 'object') return Array.isArray(value) ? value.join(', ') : JSON.stringify(value)
+  if (Array.isArray(value)) return value.map((item) => (item && typeof item === 'object' ? JSON.stringify(item) : String(item))).join(', ')
+  if (typeof value === 'object') return Object.entries(value).map(([k, v]) => `${k.replaceAll('_', ' ')}: ${v && typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ')
   return String(value)
 }
 
@@ -37,7 +38,7 @@ function download(name, contents) {
 
 export default function ResourceConsole({ module }) {
   const fieldEntries = useMemo(() => (module.fields || []).map(normalizeSpec), [module.fields])
-  const storageKey = `mydoctor:resource-filter:${module.resourceName}`
+  const storageKey = `healthpilot:resource-filter:${module.resourceName}`
   const [rows, setRows] = useState([])
   const [editing, setEditing] = useState(false)
   const [selected, setSelected] = useState(null)
@@ -160,10 +161,10 @@ export default function ResourceConsole({ module }) {
   const exportRows = checked.length ? rows.filter((row) => checked.includes(row.id)) : filtered
 
   const columns = [
-    { key: '_select', label: <input type="checkbox" checked={paged.length > 0 && paged.every((row) => checked.includes(row.id))} onChange={() => setChecked(paged.every((row) => checked.includes(row.id)) ? checked.filter((id) => !paged.some((row) => row.id === id)) : [...new Set([...checked, ...paged.map((row) => row.id)])])}/>, render: (row) => <input type="checkbox" checked={checked.includes(row.id)} onChange={() => setChecked((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])}/> },
-    { key: 'id', label: 'Reference', render: (row) => <button onClick={() => { setSelected(row); setDetailTab('details') }} className="font-bold text-primary-700 hover:underline">#{row.id}</button> },
-    ...fieldEntries.filter(([name]) => visibleKeys.includes(name)).map(([name, spec]) => ({ key: name, label: spec.label, render: (row) => name === 'status' || name === 'active' || name === 'enabled' ? <Badge color={statusTone(displayValue(row, name))}>{displayValue(row, name)}</Badge> : <span className="block max-w-[260px] truncate">{displayValue(row, name)}</span> })),
-    { key: '_actions', label: 'Actions', render: (row) => <Button variant="ghost" onClick={() => { setSelected(row); setDetailTab('details') }}><HealthIcon name="more" size={16}/> View</Button> },
+    { key: '_select', label: <input type="checkbox" checked={paged.length > 0 && paged.every((row) => checked.includes(row.id))} onChange={() => setChecked(paged.every((row) => checked.includes(row.id)) ? checked.filter((id) => !paged.some((row) => row.id === id)) : [...new Set([...checked, ...paged.map((row) => row.id)])])} aria-label="Select all rows"/>, render: (row) => <span onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={checked.includes(row.id)} onChange={() => setChecked((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} aria-label={`Select ${row.name || row.reference || row.id}`}/></span> },
+    { key: 'id', label: 'Reference', render: (row) => <button onClick={(event) => { event.stopPropagation(); setSelected(row); setDetailTab('details') }} className="font-bold text-primary-700 hover:underline">#{row.id}</button> },
+    ...fieldEntries.filter(([name]) => visibleKeys.includes(name)).map(([name, spec]) => ({ key: name, label: spec.label, render: (row) => name === 'status' || name === 'active' || name === 'enabled' ? <Badge color={statusTone(displayValue(row, name))}>{displayValue(row, name)}</Badge> : <span className="block max-w-[260px] truncate" title={displayValue(row, name)}>{displayValue(row, name)}</span> })),
+    { key: '_actions', label: 'Actions', render: (row) => <Button variant="ghost" onClick={(event) => { event.stopPropagation(); setSelected(row); setDetailTab('details') }}><HealthIcon name="more" size={16}/> View</Button> },
   ]
 
   return (
@@ -185,7 +186,7 @@ export default function ResourceConsole({ module }) {
 
       <Card title={module.label} subtitle={`${filtered.length} accessible record${filtered.length === 1 ? '' : 's'}`} icon={module.icon} actions={<div className="flex gap-2"><details className="relative"><summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"><HealthIcon name="settings" size={15}/> Columns</summary><div className="absolute right-0 z-30 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">{fieldEntries.map(([name,spec]) => <label key={name} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50"><input type="checkbox" checked={visibleKeys.includes(name)} onChange={() => setVisibleKeys((keys) => keys.includes(name) ? keys.filter((key)=>key!==name) : [...keys,name])}/>{spec.label}</label>)}</div></details><Button variant="outline" onClick={load}><HealthIcon name="refresh" size={15}/> Refresh</Button></div>}>
         {checked.length ? <div className="mb-4 flex items-center justify-between rounded-xl border border-primary-200 bg-primary-50 px-4 py-3 text-sm"><strong>{checked.length} selected</strong><Button variant="ghost" onClick={() => setChecked([])}>Clear selection</Button></div> : null}
-        {busy && !rows.length ? <Spinner /> : paged.length ? <Table rows={paged} columns={columns}/> : <EmptyState icon={module.icon} title={`No ${module.label.toLowerCase()} found`} description="Create the first record or adjust the filters." action={<Button onClick={openCreate}>Create record</Button>} />}
+        {busy && !rows.length ? <Spinner /> : paged.length ? <Table rows={paged} columns={columns} onRowClick={(row) => { setSelected(row); setDetailTab('details') }}/> : <EmptyState icon={module.icon} title={`No ${module.label.toLowerCase()} found`} description="Create the first record or adjust the filters." action={<Button onClick={openCreate}>Create record</Button>} />}
         {filtered.length > PAGE_SIZE ? <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-sm text-slate-500"><span>Page {page} of {pages}</span><div className="flex gap-2"><Button variant="outline" disabled={page <= 1} onClick={() => setPage((n)=>n-1)}>Previous</Button><Button variant="outline" disabled={page >= pages} onClick={() => setPage((n)=>n+1)}>Next</Button></div></div> : null}
       </Card>
 
@@ -199,8 +200,22 @@ export default function ResourceConsole({ module }) {
 
       <Modal open={Boolean(selected)} onClose={() => setSelected(null)} title={`${module.label} #${selected?.id || ''}`} wide>
         {selected && <div className="space-y-5">
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+            {(selected.status !== undefined) && <Badge color={statusTone(selected.status)}>{String(selected.status).replaceAll('_', ' ')}</Badge>}
+            {(selected.severity || selected.priority) && <Badge color={statusTone(selected.severity || selected.priority)}>{String(selected.severity || selected.priority).replaceAll('_', ' ')}</Badge>}
+            {(selected.operation_type || selected.record_type || selected.kind) && <Badge color="blue">{String(selected.operation_type || selected.record_type || selected.kind).replaceAll('_', ' ')}</Badge>}
+            {(selected.title || selected.name) && <strong className="ml-1 text-sm text-slate-800">{selected.title || selected.name}</strong>}
+          </div>
           <div className="flex flex-wrap gap-2 border-b border-slate-100 pb-3">{['details','configuration','activity'].map((tab) => <button key={tab} onClick={() => setDetailTab(tab)} className={`rounded-lg px-3 py-2 text-sm font-semibold capitalize ${detailTab===tab?'bg-primary-600 text-white':'text-slate-500 hover:bg-slate-100'}`}>{tab}</button>)}</div>
-          {detailTab === 'details' ? <div className="grid gap-3 md:grid-cols-2">{Object.entries(selected).filter(([key, value]) => typeof value !== 'object' && !['configuration','resource','payload','definition','schema','findings','metadata'].includes(key)).map(([key, value]) => <div key={key} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3"><small className="capitalize text-slate-500">{key.replaceAll('_', ' ')}</small><div className="mt-1 break-words text-sm font-medium text-slate-800">{String(value ?? '—')}</div></div>)}</div> : null}
+          {detailTab === 'details' ? <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2">{Object.entries(selected).filter(([key, value]) => typeof value !== 'object' && !['configuration','resource','payload','definition','schema','findings','metadata'].includes(key)).map(([key, value]) => <div key={key} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3"><small className="capitalize text-slate-500">{key.replaceAll('_', ' ')}</small><div className="mt-1 break-words text-sm font-medium text-slate-800">{String(value ?? '—')}</div></div>)}</div>
+            {Object.entries(selected).filter(([key, value]) => ['findings','metadata','scope'].includes(key) && value && typeof value === 'object' && !Array.isArray(value)).map(([key, value]) => (
+              <section key={key} className="rounded-xl border border-slate-200 p-4">
+                <h4 className="text-sm font-bold capitalize text-slate-700">{key.replaceAll('_', ' ')}</h4>
+                <dl className="mt-3 grid gap-2 sm:grid-cols-2">{Object.entries(value).map(([k, v]) => <div key={k} className="flex items-start justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm"><dt className="capitalize text-slate-500">{k.replaceAll('_', ' ')}</dt><dd className="break-words text-right font-medium text-slate-800">{v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '—')}</dd></div>)}</dl>
+              </section>
+            ))}
+          </div> : null}
           {detailTab === 'configuration' ? <div className="space-y-4">{Object.entries(selected).filter(([, value]) => value && typeof value === 'object').map(([key, value]) => <div key={key}><h4 className="mb-2 text-sm font-bold capitalize text-slate-700">{key.replaceAll('_', ' ')}</h4><pre className="max-h-80 overflow-auto rounded-xl bg-slate-950 p-4 text-xs leading-6 text-slate-100">{JSON.stringify(value, null, 2)}</pre></div>)}{!Object.values(selected).some((value)=>value&&typeof value==='object') && <EmptyState icon="file" title="No structured configuration" description="This resource stores scalar values only."/>}</div> : null}
           {detailTab === 'activity' ? <div className="space-y-3">{['created_at','updated_at','published_at','last_health_check_at','last_delivery_at'].filter((key)=>selected[key]).map((key) => <div key={key} className="flex items-center justify-between rounded-xl border border-slate-100 p-3 text-sm"><span className="capitalize">{key.replaceAll('_',' ')}</span><strong>{new Date(selected[key]).toLocaleString()}</strong></div>)}<Alert tone="info">Full field-level history is also retained in the platform audit log when this resource is changed through the API.</Alert></div> : null}
           {(actionsFor(selected).length > 0 || fieldEntries.length) && <div className="border-t border-slate-100 pt-4"><h4 className="mb-3 text-sm font-bold text-slate-700">Available actions</h4>{actionsFor(selected).some((name)=>['reject','quarantine'].includes(name)) ? <Textarea label="Action reason" value={actionReason} onChange={(event)=>setActionReason(event.target.value)} /> : null}<div className="mt-3 flex flex-wrap gap-2">{actionsFor(selected).map((name) => <Button key={name} onClick={() => action(selected, name)} variant={name === 'reject' || name === 'quarantine' ? 'danger' : 'outline'} disabled={busy}>{name.replaceAll('_', ' ')}</Button>)}<Button variant="outline" onClick={() => openEdit(selected)}><HealthIcon name="file" size={15}/> Edit</Button>{Object.prototype.hasOwnProperty.call(selected,'active') || Object.prototype.hasOwnProperty.call(selected,'enabled') ? <Button variant="outline" onClick={() => archive(selected)}>{selected.active === false || selected.enabled === false ? 'Reactivate' : 'Deactivate'}</Button> : null}<Button variant="danger" onClick={() => remove(selected)}>Delete</Button></div></div>}

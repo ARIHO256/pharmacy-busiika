@@ -1,6 +1,6 @@
 {
-  "name": "MyDoctor HealthOS",
-  "short_name": "MyDoctor",
+  "name": "HealthPilot HealthOS",
+  "short_name": "HealthPilot",
   "description": "Secure connected healthcare for patients and care teams.",
   "start_url": "/",
   "display": "standalone",

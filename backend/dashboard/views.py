@@ -1,9 +1,9 @@
-from datetime import date
+from datetime import date, timedelta
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -242,6 +242,18 @@ class AdminUserSetStatusView(APIView):
             return Response(
                 {"detail": "A reason is required for this account action."}, status=400
             )
+        target_is_admin = User.objects.filter(pk=user.pk, role=User.Role.ADMIN).exists()
+        if (
+            action == "suspend"
+            and target_is_admin
+            and not User.objects.filter(role=User.Role.ADMIN, is_active=True)
+            .exclude(pk=user.pk)
+            .exists()
+        ):
+            return Response(
+                {"detail": "Cannot deactivate the last remaining platform administrator."},
+                status=400,
+            )
 
         credential = None
         if _roles_for_user(user) & PROFESSIONAL_ROLES:
@@ -366,7 +378,7 @@ class AdminUserSetStatusView(APIView):
                 user,
                 f"Account status: {action}",
                 reason
-                or f"Your MyDoctor account status was changed by an administrator: {action}.",
+                or f"Your HealthPilot account status was changed by an administrator: {action}.",
                 kind="verification" if action in {"verify", "reject"} else "account",
                 priority="high",
                 action_url=portal_path_for_role(active_role(user)),
@@ -490,6 +502,50 @@ class AdminReviewsView(APIView):
         return Response(ReviewAdminSerializer(qs, many=True).data)
 
 
+class AdminReviewActionView(APIView):
+    """POST /api/admin/reviews/<pk>/action/ — flag, hide, or restore a review.
+
+    Hidden/flagged reviews leave the public listing and stop counting toward
+    the doctor's average rating until unhidden.
+    """
+
+    permission_classes = [IsRole]
+    allowed_roles = ["admin"]
+
+    def post(self, request, pk):
+        from reviews.models import Review
+        from reviews.serializers import ReviewAdminSerializer
+        from reviews.views import _recompute_average_rating
+
+        action = request.data.get("action")
+        if action not in ("flag", "hide", "unhide"):
+            return Response(
+                {"detail": "action must be flag|hide|unhide"}, status=400
+            )
+        review = Review.objects.select_related("doctor").filter(pk=pk).first()
+        if review is None:
+            return Response({"detail": "review not found"}, status=404)
+
+        review.status = {
+            "flag": Review.Status.FLAGGED,
+            "hide": Review.Status.HIDDEN,
+            "unhide": Review.Status.VISIBLE,
+        }[action]
+        review.moderated_by = request.user
+        review.moderated_at = timezone.now()
+        review.moderation_note = str(request.data.get("note", "")).strip()
+        review.save(
+            update_fields=["status", "moderated_by", "moderated_at", "moderation_note"]
+        )
+        _recompute_average_rating(review.doctor)
+        log_action(
+            request.user,
+            f"review.{action}",
+            {"review_id": review.id, "note": review.moderation_note},
+        )
+        return Response(ReviewAdminSerializer(review).data)
+
+
 class AdminAuditView(APIView):
     """GET /api/admin/audit/ — newest first."""
 
@@ -499,3 +555,224 @@ class AdminAuditView(APIView):
     def get(self, request):
         qs = AuditLog.objects.select_related("user").order_by("-created_at")
         return Response(AuditLogSerializer(qs, many=True).data)
+
+
+class AdminAppointmentAnalyticsView(APIView):
+    """GET /api/admin/analytics/appointments/?from=&to= (YYYY-MM-DD).
+
+    Defaults to the last 30 days when no range is supplied.
+    """
+
+    permission_classes = [IsRole]
+    allowed_roles = ["admin"]
+
+    def get(self, request):
+        from appointments.models import Appointment
+
+        today = timezone.localdate()
+        try:
+            date_to = (
+                date.fromisoformat(request.query_params["to"])
+                if request.query_params.get("to")
+                else today
+            )
+            date_from = (
+                date.fromisoformat(request.query_params["from"])
+                if request.query_params.get("from")
+                else date_to - timedelta(days=29)
+            )
+        except ValueError:
+            return Response(
+                {"detail": "from/to must be YYYY-MM-DD dates"}, status=400
+            )
+        if date_from > date_to:
+            return Response({"detail": "from must not be after to"}, status=400)
+
+        qs = Appointment.objects.filter(date__gte=date_from, date__lte=date_to)
+
+        totals_by_status = {
+            row["status"]: row["c"]
+            for row in qs.values("status").annotate(c=Count("id"))
+        }
+        total = sum(totals_by_status.values())
+        missed = totals_by_status.get("missed", 0)
+
+        per_day_map = {}
+        for row in qs.values("date", "status").annotate(c=Count("id")):
+            entry = per_day_map.setdefault(
+                row["date"], {"date": row["date"], "total": 0, "by_status": {}}
+            )
+            entry["by_status"][row["status"]] = row["c"]
+            entry["total"] += row["c"]
+        per_day = [per_day_map[day] for day in sorted(per_day_map)]
+
+        doctor_rows = list(
+            qs.values("doctor")
+            .annotate(
+                total=Count("id"),
+                completed=Count("id", filter=Q(status="completed")),
+                missed=Count("id", filter=Q(status="missed")),
+            )
+            .order_by("-total")[:20]
+        )
+        doctor_names = {
+            user.id: _name(user)
+            for user in User.objects.filter(
+                pk__in=[row["doctor"] for row in doctor_rows]
+            )
+        }
+        doctors = [
+            {
+                "doctor": row["doctor"],
+                "doctor_name": doctor_names.get(row["doctor"]),
+                "total": row["total"],
+                "completed": row["completed"],
+                "missed": row["missed"],
+            }
+            for row in doctor_rows
+        ]
+
+        revenue = 0
+        try:
+            from payments.models import Invoice
+
+            revenue = (
+                Invoice.objects.filter(
+                    status="paid",
+                    appointment__date__gte=date_from,
+                    appointment__date__lte=date_to,
+                ).aggregate(t=Sum("amount"))["t"]
+                or 0
+            )
+        except Exception:
+            pass
+
+        return Response(
+            {
+                "from": date_from,
+                "to": date_to,
+                "total": total,
+                "totals_by_status": totals_by_status,
+                "missed_rate": round(missed * 100 / total, 2) if total else 0,
+                "per_day": per_day,
+                "doctors": doctors,
+                "revenue": revenue,
+            }
+        )
+
+
+class AdminUserSetRoleView(APIView):
+    """POST /api/admin/users/<pk>/set-role/ — platform super admin only.
+
+    The last remaining platform administrator cannot be demoted.
+    """
+
+    permission_classes = [IsRole]
+    allowed_roles = ["admin"]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        role = str(request.data.get("role", "")).strip()
+        if role not in User.Role.values:
+            return Response(
+                {"detail": "invalid role", "valid_roles": sorted(User.Role.values)},
+                status=400,
+            )
+        try:
+            user = User.objects.select_for_update().get(pk=pk)
+        except User.DoesNotExist:
+            return Response({"detail": "user not found"}, status=404)
+
+        previous = user.role
+        if role == previous:
+            return Response({"id": user.id, "email": user.email, "role": user.role})
+        if (
+            previous == User.Role.ADMIN
+            and not User.objects.filter(role=User.Role.ADMIN, is_active=True)
+            .exclude(pk=user.pk)
+            .exists()
+        ):
+            return Response(
+                {"detail": "Cannot demote the last remaining platform administrator."},
+                status=400,
+            )
+
+        user.role = role
+        user.save(update_fields=["role"])
+        log_action(
+            request.user,
+            "user.set_role",
+            {
+                "target_user_id": user.id,
+                "target_email": user.email,
+                "from_role": previous,
+                "to_role": role,
+            },
+        )
+        return Response({"id": user.id, "email": user.email, "role": user.role})
+
+
+class AdminBroadcastView(APIView):
+    """POST /api/admin/notifications/broadcast/ — {title, message, roles[], channels[]}.
+
+    Fans out through communication.services.notify, which applies each
+    recipient's notification channel preferences.
+    """
+
+    permission_classes = [IsRole]
+    allowed_roles = ["admin"]
+
+    def post(self, request):
+        title = str(request.data.get("title", "")).strip()
+        message = str(request.data.get("message", "")).strip()
+        if not title or not message:
+            return Response(
+                {"detail": "title and message are required"}, status=400
+            )
+
+        roles = request.data.get("roles") or []
+        if not isinstance(roles, list) or any(
+            role not in User.Role.values for role in roles
+        ):
+            return Response(
+                {"detail": "roles must be a list of valid role codes"}, status=400
+            )
+
+        channels = request.data.get("channels") or None
+        if channels is not None:
+            from communication.models import NotificationDelivery
+
+            if not isinstance(channels, list) or any(
+                channel not in NotificationDelivery.Channel.values
+                for channel in channels
+            ):
+                return Response(
+                    {"detail": "channels must be a list of valid channel codes"},
+                    status=400,
+                )
+
+        recipients = User.objects.filter(is_active=True)
+        if roles:
+            recipients = recipients.filter(role__in=roles)
+
+        from communication.services import notify
+
+        count = 0
+        for user in recipients:
+            try:
+                notify(user, title, message, kind="general", channels=channels)
+                count += 1
+            except Exception:
+                pass
+
+        log_action(
+            request.user,
+            "notifications.broadcast",
+            {
+                "title": title,
+                "roles": roles,
+                "channels": channels or [],
+                "recipients": count,
+            },
+        )
+        return Response({"recipients": count})
