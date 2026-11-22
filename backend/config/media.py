@@ -11,6 +11,7 @@ from django.views.static import serve
 
 
 PRIVATE_MEDIA_PREFIXES = (
+    "private-documents/",
     "doctors/licenses/",
     "doctors/certificates/",
     "organizations/licenses/",

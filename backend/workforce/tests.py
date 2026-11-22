@@ -24,7 +24,7 @@ class WorkforceRoleWorkflowTests(TestCase):
         )
         self.organization = Organization.objects.create(
             owner=self.owner,
-            legal_name="HealthPilot General Hospital",
+            legal_name="MyDoctor General Hospital",
             organization_type=Organization.Type.HOSPITAL,
             license_number="HOSP-001",
             status=Organization.Status.VERIFIED,
@@ -223,3 +223,20 @@ class WorkforceRoleWorkflowTests(TestCase):
         self.assertTrue(receptionist.is_active)
         membership.refresh_from_db()
         self.assertEqual(membership.status, StaffMembership.Status.SUSPENDED)
+
+
+    def test_structured_handover_is_saved_and_scope_is_enforced(self):
+        nurse = User.objects.create_user(email="handover-nurse@example.com", role=User.Role.NURSE, is_verified=True)
+        outsider = User.objects.create_user(email="outside-nurse@example.com", role=User.Role.NURSE, is_verified=True)
+        StaffMembership.objects.create(user=nurse, organization=self.organization, role=nurse.role)
+        visit = PatientVisit.objects.create(patient=self.patient, organization=self.organization)
+        fields = {"situation": "Awaiting review", "assessment": "Observations recorded", "next_actions": "Ward nurse to follow up"}
+        url = "/api/workforce/nursing-notes/"
+        self.client.force_authenticate(nurse)
+        response = self.client.post(url, {"visit": visit.pk, "note_type": "handover", "note": fields["situation"], "handover": fields}, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["handover"], fields)
+        response = self.client.get(url, {"note_type": "handover"})
+        self.assertEqual(len(response.data), 1)
+        self.client.force_authenticate(outsider)
+        self.assertEqual(self.client.get(url, {"visit": visit.pk}).status_code, 403)

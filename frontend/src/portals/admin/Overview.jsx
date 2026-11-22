@@ -15,6 +15,20 @@ function BarRow({ label, value, max, colorClass }) {
   )
 }
 
+const operationalMetrics = [
+  ['visits', 'Facility visits'],
+  ['nursing_handovers', 'Nursing handovers'],
+  ['lab_orders', 'Lab orders'],
+  ['released_lab_results', 'Released lab results'],
+  ['medicines', 'Pharmacy catalog items'],
+  ['medicine_register', 'NDA reference records'],
+  ['pharmacy_orders', 'Pharmacy store orders'],
+  ['invoices', 'Invoices'],
+  ['insurance_claims', 'Insurance claims'],
+  ['active_consents', 'Active consents'],
+  ['audit_events', 'Audit events'],
+]
+
 const commandLinks = [
   ['users', 'users', 'Manage users', 'Roles, access, suspension and account operations'],
   ['registry', 'doctor', 'Verify providers', 'Credentials, licences and facility affiliations'],
@@ -48,7 +62,7 @@ export default function Overview() {
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-primary-900 p-6 text-white shadow-[0_22px_55px_rgba(6,17,31,.22)] md:p-8">
         <div className="absolute -right-14 -top-16 h-64 w-64 rounded-full border border-sky-200/10 shadow-[0_0_0_55px_rgba(59,130,208,.05),0_0_0_110px_rgba(59,130,208,.025)]" />
         <div className="relative grid gap-6 lg:grid-cols-[1.2fr_.8fr] lg:items-end">
-          <div><span className="text-xs font-bold uppercase tracking-[0.18em] text-sky-200">Platform governance · Live operations</span><h2 className="mt-3 text-3xl font-bold tracking-tight md:text-4xl">HealthPilot command centre.</h2><p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">Operate the complete healthcare network across identity, appointments, finance, provider verification, quality, compliance and audit.</p><div className="mt-5 flex flex-wrap gap-3"><Link to="registry" className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-white px-4 text-sm font-bold text-primary-900"><HealthIcon name="doctor" size={17}/> Verify providers</Link><Link to="compliance" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/20 bg-white/5 px-4 text-sm font-semibold"><HealthIcon name="shield" size={17}/> Compliance centre</Link></div></div>
+          <div><span className="text-xs font-bold uppercase tracking-[0.18em] text-sky-200">Platform governance · Live operations</span><h2 className="mt-3 text-3xl font-bold tracking-tight md:text-4xl">MyDoctor command centre.</h2><p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">Operate the complete healthcare network across identity, appointments, finance, provider verification, quality, compliance and audit.</p><div className="mt-5 flex flex-wrap gap-3"><Link to="registry" className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-white px-4 text-sm font-bold text-primary-900"><HealthIcon name="doctor" size={17}/> Verify providers</Link><Link to="compliance" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/20 bg-white/5 px-4 text-sm font-semibold"><HealthIcon name="shield" size={17}/> Compliance centre</Link></div></div>
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur"><span className="text-xs text-slate-300">Pending verifications</span><strong className="mt-2 block text-3xl">{data.pending_verifications}</strong><small className="mt-1 block text-sky-200">Provider review queue</small></div>
             <div className="rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur"><span className="text-xs text-slate-300">Pending payouts</span><strong className="mt-2 block text-3xl">{data.pending_payouts}</strong><small className="mt-1 block text-sky-200">Settlement actions</small></div>
@@ -65,6 +79,17 @@ export default function Overview() {
         <Stat label="Pending payouts" value={data.pending_payouts} icon="wallet" tone="text-amber-600" caption="Provider settlement queue" />
         <Stat label="Notification failures" value={data.failed_notification_deliveries || 0} icon="bell" tone="text-rose-600" caption="Delivery jobs requiring attention" />
       </div>
+
+      <Card title="Operational records" subtitle="Records available across the connected workspaces" icon="clipboard">
+        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+          {operationalMetrics.map(([key, label]) => (
+            <div key={key} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <dt className="text-sm text-slate-600">{label}</dt>
+              <dd className="mt-1 text-xl font-semibold text-slate-900">{data.operation_counts?.[key]?.toLocaleString() ?? '—'}</dd>
+            </div>
+          ))}
+        </dl>
+      </Card>
 
       <Card title="Operational command shortcuts" subtitle="Every control area from the admin branch of the platform flow" icon="dashboard">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">

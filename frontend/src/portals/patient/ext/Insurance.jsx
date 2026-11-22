@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import client from '../../../api/client'
 import { paymentApi, servicesApi } from '../../../api/endpoints'
-import { Badge, Button, Card, Input, Modal, Select, Spinner, Table, Textarea } from '../../../components/ui'
+import { Badge, Button, Card, Input, Modal, Select, Spinner, Table } from '../../../components/ui'
 import { fmtDT, statusColor, ugx } from './helpers'
 
 export default function Insurance() {
-  const [tab, setTab] = useState('policies') // policies | coverage | preauthorizations | claims
+  const [tab, setTab] = useState('policies') // policies | coverage | claims
   const [insurers, setInsurers] = useState([])
   const [policies, setPolicies] = useState(null)
   const [providerFilter, setProviderFilter] = useState('')
@@ -35,16 +35,6 @@ export default function Insurance() {
   const [claimPolicies, setClaimPolicies] = useState([])
   const [paidInvoices, setPaidInvoices] = useState([])
   const [submitting, setSubmitting] = useState(false)
-
-  // preauthorization
-  const [preauthorizations, setPreauthorizations] = useState(null)
-  const [preauthOpen, setPreauthOpen] = useState(false)
-  const [preauthCoverage, setPreauthCoverage] = useState('')
-  const [preauthService, setPreauthService] = useState('')
-  const [preauthCode, setPreauthCode] = useState('')
-  const [preauthDiagnosis, setPreauthDiagnosis] = useState('')
-  const [preauthIndication, setPreauthIndication] = useState('')
-  const [preauthAmount, setPreauthAmount] = useState('')
 
   const [notice, setNotice] = useState(null)
 
@@ -90,24 +80,10 @@ export default function Insurance() {
     }
   }, [])
 
-  const loadPreauthorizations = useCallback(async () => {
-    setPreauthorizations(null)
-    try {
-      const { data } = await servicesApi.preauthorizations()
-      setPreauthorizations(data)
-    } catch {
-      setPreauthorizations([])
-    }
-  }, [])
-
   useEffect(() => {
     if (tab === 'coverage') loadCoverage()
-    if (tab === 'preauthorizations') {
-      loadCoverage()
-      loadPreauthorizations()
-    }
     if (tab === 'claims') loadClaims()
-  }, [tab, loadCoverage, loadClaims, loadPreauthorizations])
+  }, [tab, loadCoverage, loadClaims])
 
   const insurerName = (id) => insurers.find((i) => i.id === id)?.org_name || `Insurer #${id}`
 
@@ -214,40 +190,6 @@ export default function Insurance() {
     }
   }
 
-  const openPreauthorization = () => {
-    if (coverage === null) loadCoverage()
-    setPreauthCoverage('')
-    setPreauthService('')
-    setPreauthCode('')
-    setPreauthDiagnosis('')
-    setPreauthIndication('')
-    setPreauthAmount('')
-    setPreauthOpen(true)
-  }
-
-  const submitPreauthorization = async (e) => {
-    e.preventDefault()
-    setSubmitting(true)
-    try {
-      await servicesApi.requestPreauthorization({
-        coverage_id: preauthCoverage,
-        service_name: preauthService,
-        service_code: preauthCode,
-        diagnosis_code: preauthDiagnosis,
-        clinical_indication: preauthIndication,
-        requested_amount: Number(preauthAmount || 0),
-      })
-      setNotice({ type: 'success', text: 'Preauthorization request submitted.' })
-      setPreauthOpen(false)
-      loadPreauthorizations()
-    } catch (err) {
-      setNotice({ type: 'error', text: err?.response?.data?.detail || 'Failed to submit preauthorization' })
-      setPreauthOpen(false)
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
   return (
     <div className="space-y-4">
       {notice && (
@@ -277,12 +219,6 @@ export default function Insurance() {
           onClick={() => setTab('coverage')}
         >
           My Coverage
-        </Button>
-        <Button
-          variant={tab === 'preauthorizations' ? 'primary' : 'outline'}
-          onClick={() => setTab('preauthorizations')}
-        >
-          Preauthorizations
         </Button>
         <Button variant={tab === 'claims' ? 'primary' : 'outline'} onClick={() => setTab('claims')}>
           My Claims
@@ -329,12 +265,6 @@ export default function Insurance() {
                     <span className="text-slate-500">Premium: </span>
                     <span className="font-bold text-primary-600">{ugx(p.premium)}</span>
                   </p>
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500">
-                    <span>Deductible: {ugx(p.deductible)}</span>
-                    <span>Copay: {p.copay_percent}%</span>
-                    <span>Annual limit: {p.annual_limit ? ugx(p.annual_limit) : 'Unlimited'}</span>
-                    <span>{p.requires_preauthorization ? 'Preauthorization applies' : 'Rule-based authorization'}</span>
-                  </div>
                 </Card>
               ))}
             </div>
@@ -416,8 +346,6 @@ export default function Insurance() {
                     render: (r) => `${r.coverage_percent}%`,
                   },
                   { key: 'member_id', label: 'Member ID' },
-                  { key: 'effective_from', label: 'Effective', render: (r) => r.effective_from || '—' },
-                  { key: 'expires_on', label: 'Expires', render: (r) => r.expires_on || 'No expiry' },
                   {
                     key: 'active',
                     label: 'Status',
@@ -435,27 +363,6 @@ export default function Insurance() {
         </div>
       )}
 
-      {tab === 'preauthorizations' && (
-        <Card title="My Preauthorizations" actions={<Button onClick={openPreauthorization}>Request Authorization</Button>}>
-          {preauthorizations === null ? <Spinner label="Loading preauthorizations…" /> : (
-            <Table
-              empty="No preauthorization requests yet."
-              columns={[
-                { key: 'authorization_number', label: 'Authorization', render: (r) => r.authorization_number || `#${r.id}` },
-                { key: 'service_name', label: 'Service' },
-                { key: 'policy_name', label: 'Policy' },
-                { key: 'requested_amount', label: 'Requested', render: (r) => ugx(r.requested_amount) },
-                { key: 'approved_amount', label: 'Approved', render: (r) => ugx(r.approved_amount) },
-                { key: 'status', label: 'Status', render: (r) => <Badge color={statusColor(r.status)}>{String(r.status).replace(/_/g, ' ')}</Badge> },
-                { key: 'valid_until', label: 'Valid until', render: (r) => r.valid_until || '—' },
-                { key: 'decision_reason', label: 'Decision', render: (r) => r.decision_reason || 'Awaiting review' },
-              ]}
-              rows={preauthorizations}
-            />
-          )}
-        </Card>
-      )}
-
       {tab === 'claims' && (
         <Card
           title="My Claims"
@@ -467,7 +374,7 @@ export default function Insurance() {
             <Table
               empty="No claims submitted yet."
               columns={[
-                { key: 'claim_number', label: 'Claim', render: (r) => r.claim_number || `#${r.id}` },
+                { key: 'id', label: '#', render: (r) => `#${r.id}` },
                 {
                   key: 'provider',
                   label: 'Provider',
@@ -480,8 +387,6 @@ export default function Insurance() {
                   render: (r) => r.invoice_number || '—',
                 },
                 { key: 'amount', label: 'Amount', render: (r) => ugx(r.amount) },
-                { key: 'approved_amount', label: 'Approved', render: (r) => ugx(r.approved_amount) },
-                { key: 'patient_responsibility', label: 'My share', render: (r) => ugx(r.patient_responsibility) },
                 {
                   key: 'status',
                   label: 'Status',
@@ -544,28 +449,6 @@ export default function Insurance() {
             <Button type="submit" disabled={saving || !addProvider || !addPolicy || !addMemberId}>
               {saving ? 'Saving…' : 'Save Coverage'}
             </Button>
-          </div>
-        </form>
-      </Modal>
-
-      <Modal open={preauthOpen} onClose={() => setPreauthOpen(false)} title="Request Preauthorization" wide>
-        <form onSubmit={submitPreauthorization} className="space-y-4">
-          <Select label="Coverage" value={preauthCoverage} onChange={(e) => setPreauthCoverage(e.target.value)} required>
-            <option value="">Select active coverage…</option>
-            {(coverage || []).filter((item) => item.is_current).map((item) => (
-              <option key={item.id} value={item.id}>{item.provider_name} — {item.policy_name} — {item.member_id}</option>
-            ))}
-          </Select>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input label="Service or procedure" value={preauthService} onChange={(e) => setPreauthService(e.target.value)} required />
-            <Input label="Service code" value={preauthCode} onChange={(e) => setPreauthCode(e.target.value)} />
-            <Input label="Diagnosis code" value={preauthDiagnosis} onChange={(e) => setPreauthDiagnosis(e.target.value)} />
-            <Input label="Requested amount (UGX)" type="number" min="1" value={preauthAmount} onChange={(e) => setPreauthAmount(e.target.value)} required />
-          </div>
-          <Textarea label="Clinical indication" rows={4} value={preauthIndication} onChange={(e) => setPreauthIndication(e.target.value)} required />
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setPreauthOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={submitting || !preauthCoverage || !preauthService || !preauthAmount}>{submitting ? 'Submitting…' : 'Submit Request'}</Button>
           </div>
         </form>
       </Modal>

@@ -5,14 +5,12 @@ import { Badge, Button, Card, Input, Modal, Select, Spinner, Table } from '../..
 import { APPT_STATUS_COLORS, fmtTime, fmtUGX } from './utils'
 
 export default function Appointments() {
-  const allowMockPayments = String(import.meta.env.VITE_ALLOW_MOCK_PAYMENTS || '').toLowerCase() === 'true'
   const [appointments, setAppointments] = useState(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
   const [payFor, setPayFor] = useState(null)
   const [method, setMethod] = useState('mobile_money')
-  const [gateway, setGateway] = useState('mtn_momo')
   const [phone, setPhone] = useState('')
   const [paying, setPaying] = useState(false)
   const [payError, setPayError] = useState('')
@@ -75,36 +73,12 @@ export default function Appointments() {
         appointment_id: payFor.id,
         method,
         phone: phone || undefined,
-        gateway,
       })
-      if (data.mock && !allowMockPayments && !data.simulated) {
-        throw new Error('Mock payments are disabled in this build.')
-      }
-      if (data.mock && data.checkout_url) {
-        await client.post(data.checkout_url.replace(/^\/api/, ''))
-        setPayFor(null)
-        setNotice(
-          data.simulated
-            ? 'Payment simulated successfully (demo gateway) — your appointment is confirmed.'
-            : 'Payment successful — your appointment is confirmed.'
-        )
-        load()
-      } else if (data.checkout_url) {
-        setNotice(`Opening secure ${data.gateway} checkout for invoice ${data.invoice_number}.`)
-        window.location.assign(data.checkout_url)
-      } else {
-        setPayFor(null)
-        setNotice(data.instructions || `Payment request sent through ${data.gateway}. Approve it on your phone. Invoice ${data.invoice_number} will update automatically after confirmation.`)
-        window.setTimeout(async () => {
-          try {
-            const response = await paymentApi.status(data.invoice_number)
-            if (response.data.status === 'paid') {
-              setNotice('Payment confirmed — your appointment is ready.')
-              load()
-            }
-          } catch { /* webhook remains the source of truth */ }
-        }, 8000)
-      }
+      // mock gateway: hitting the checkout URL completes the payment
+      await client.post(data.checkout_url.replace(/^\/api/, ''))
+      setPayFor(null)
+      setNotice('Payment successful — your appointment is confirmed.')
+      load()
     } catch (err) {
       setPayError(err.response?.data?.detail || 'Payment failed. Please try again.')
     } finally {
@@ -130,11 +104,6 @@ export default function Appointments() {
   if (!appointments) return <Spinner label="Loading appointments…" />
 
   const columns = [
-    {
-      key: 'patient',
-      label: 'Patient',
-      render: (a) => <div><div className="font-medium text-slate-800">{a.patient_name}</div>{a.booked_by && a.booked_by !== a.patient && <div className="text-xs text-slate-400">Booked by caregiver</div>}</div>,
-    },
     {
       key: 'doctor',
       label: 'Doctor',
@@ -181,7 +150,6 @@ export default function Appointments() {
                 onClick={() => {
                   setPayFor(a)
                   setMethod('mobile_money')
-                  setGateway('mtn_momo')
                   setPhone('')
                   setPayError('')
                 }}
@@ -256,26 +224,10 @@ export default function Appointments() {
             <p className="text-sm text-slate-600">
               Dr. {payFor.doctor_name} · {payFor.date} · {fmtTime(payFor.start_time)}
             </p>
-            <Select label="Payment method" value={method} onChange={(e) => {
-              const next = e.target.value
-              setMethod(next)
-              setGateway(next === 'mobile_money' ? 'mtn_momo' : next === 'card' ? 'flutterwave' : allowMockPayments ? 'mock' : 'mtn_momo')
-            }}>
+            <Select label="Payment method" value={method} onChange={(e) => setMethod(e.target.value)}>
               <option value="mobile_money">Mobile Money</option>
               <option value="card">Card</option>
-              {allowMockPayments && <option value="wallet">Development wallet</option>}
-            </Select>
-            <Select label="Payment provider" value={gateway} onChange={(e) => setGateway(e.target.value)}>
-              {method === 'mobile_money' && <>
-                <option value="mtn_momo">MTN Mobile Money</option>
-                <option value="airtel_money">Airtel Money</option>
-                <option value="flutterwave">Flutterwave Mobile Money</option>
-              </>}
-              {method === 'card' && <>
-                <option value="flutterwave">Flutterwave Card</option>
-                <option value="paystack">Paystack Card</option>
-              </>}
-              {method === 'wallet' && allowMockPayments && <option value="mock">Development-only mock gateway</option>}
+              <option value="wallet">Wallet</option>
             </Select>
             {method === 'mobile_money' && (
               <Input

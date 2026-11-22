@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
-import { servicesApi } from '../../api/endpoints'
+import { registryApi, servicesApi } from '../../api/endpoints'
 import { useAuth } from '../../auth/AuthContext'
-import { Card, Stat, Table } from '../../components/ui'
+import { Alert, Card, Spinner, Stat, Table } from '../../components/ui'
 import { LoadingOrError, StatusBadge, useApi } from '../pharmacy/shared'
 
 export default function Dashboard() {
@@ -15,6 +15,16 @@ export default function Dashboard() {
       }),
     ),
   )
+
+  const facilityPharmacies = useApi(async () => {
+    const { data: organizations } = await registryApi.myOrganizations()
+    const facilities = organizations.filter((org) => ['clinic', 'hospital'].includes(org.organization_type))
+    const responses = await Promise.all(facilities.map(async (facility) => {
+      const { data: pharmacies } = await registryApi.organizations({ type: 'pharmacy', parent_facility: facility.id })
+      return pharmacies.map((pharmacy) => ({ ...pharmacy, facility: facility.legal_name }))
+    }))
+    return { data: responses.flat() }
+  })
 
   const services = data?.services || []
   const bookings = data?.bookings || []
@@ -30,6 +40,14 @@ export default function Dashboard() {
           <Stat label="Beds occupied" value={`${occupied} / ${beds.length}`} icon="🛏️" tone="text-rose-600" />
           <Stat label="Beds available" value={beds.length - occupied} icon="✅" tone="text-emerald-600" />
         </div>
+        <Card title="Facility pharmacies" subtitle="Affiliated dispensaries available for prescription routing">
+          {facilityPharmacies.loading ? <Spinner label="Loading pharmacies…" /> : facilityPharmacies.error ?
+            <Alert tone="danger">{facilityPharmacies.error}</Alert> :
+            <Table rows={facilityPharmacies.data || []} empty="No pharmacy is affiliated with this facility." columns={[
+              { key: 'legal_name', label: 'Pharmacy' }, { key: 'facility', label: 'Facility' },
+              { key: 'phone', label: 'Contact', render: (row) => row.phone || row.contact_email || '—' },
+            ]} />}
+        </Card>
         <Card
           title="Recent bookings"
           actions={

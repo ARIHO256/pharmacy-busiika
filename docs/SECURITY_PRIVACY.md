@@ -2,7 +2,7 @@
 
 ## 1. Security model
 
-HealthPilot uses layered decisions rather than trusting role alone:
+MyDoctor uses layered decisions rather than trusting role alone:
 
 ```text
 Authentication

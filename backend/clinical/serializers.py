@@ -9,7 +9,6 @@ from .models import (
     MedicationStatement,
     Observation,
     Referral,
-    ReferralStatusHistory,
 )
 
 
@@ -139,54 +138,17 @@ class ObservationSerializer(serializers.ModelSerializer):
         return f"{obj.recorded_by.first_name} {obj.recorded_by.last_name}".strip() or obj.recorded_by.email
 
 
-class ReferralStatusHistorySerializer(serializers.ModelSerializer):
-    actor_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ReferralStatusHistory
-        fields = ["id", "actor", "actor_name", "from_status", "to_status", "reason", "metadata", "created_at"]
-
-    def get_actor_name(self, obj):
-        if not obj.actor:
-            return None
-        return obj.actor.display_name
-
-
 class ReferralSerializer(serializers.ModelSerializer):
     provider_name = serializers.SerializerMethodField()
-    target_provider_name = serializers.SerializerMethodField()
-    target_organization_name = serializers.CharField(source="target_organization.name", read_only=True)
-    patient_name = serializers.CharField(source="patient.display_name", read_only=True)
-    status_history = ReferralStatusHistorySerializer(many=True, read_only=True)
 
     class Meta:
         model = Referral
         fields = "__all__"
-        read_only_fields = [
-            "patient", "referring_provider", "status", "accepted_by", "accepted_at",
-            "completed_at", "outcome_summary", "decline_reason",
-            "feedback_acknowledged_at", "created_at", "updated_at",
-        ]
+        read_only_fields = ["patient", "referring_provider", "created_at", "updated_at"]
 
     def get_provider_name(self, obj):
-        return obj.referring_provider.display_name
-
-    def get_target_provider_name(self, obj):
-        return obj.target_provider.display_name if obj.target_provider else ""
-
-    def validate_target_provider(self, value):
-        if value is None:
-            return value
-        from accounts.professionals import professional_is_verified
-        from accounts.roles import BOOKABLE_PROVIDER_ROLES
-        if value.role not in BOOKABLE_PROVIDER_ROLES or not professional_is_verified(value, require_bookable=True):
-            raise serializers.ValidationError("The receiving provider must be active, verified and enabled for appointments.")
-        return value
-
-    def validate_target_organization(self, value):
-        if value is not None and (not value.active or value.status != "verified"):
-            raise serializers.ValidationError("The receiving organization must be active and verified.")
-        return value
+        user = obj.referring_provider
+        return f"{user.first_name} {user.last_name}".strip() or user.email
 
 
 class CarePlanSerializer(serializers.ModelSerializer):

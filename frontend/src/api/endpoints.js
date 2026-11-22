@@ -3,30 +3,12 @@ import client from './client'
 // ===== auth & accounts =====
 export const authApi = {
   login: (email, password) => client.post('/auth/token/', { email, password }),
-  verifyMfa: (challenge_id, code) => client.post('/auth/mfa/verify/', { challenge_id, code }),
-  forgotPassword: (email) => client.post('/auth/password/forgot/', { email }),
-  resetPassword: (token_id, token, password) => client.post('/auth/password/reset/', { token_id, token, password }),
-  changePassword: (payload) => client.post('/auth/password/change/', payload),
-  requestEmailVerification: () => client.post('/auth/email-verification/request/'),
-  requestPhoneVerification: () => client.post('/auth/phone-verification/request/'),
-  verifyPhone: (token_id, code) => client.post('/auth/phone-verification/verify/', { token_id, code }),
-  sessions: () => client.get('/auth/sessions/'),
-  revokeSession: (token_id = 'all') => client.post('/auth/sessions/', { token_id }),
-  logout: (refresh) => client.post('/auth/logout/', { refresh }),
-  verifyEmail: (token_id, token) => client.post('/auth/email-verification/verify/', { token_id, token }),
-  security: () => client.get('/auth/security/'),
-  updateSecurity: (payload) => client.patch('/auth/security/', payload),
-  securityEvents: () => client.get('/auth/security/events/'),
   register: (payload) => client.post('/auth/register/', payload),
   invitation: (token) => client.get(`/workforce/invitations/${token}/`),
   acceptInvitation: (token, payload) => client.post(`/workforce/invitations/${token}/`, payload),
   me: () => client.get('/auth/me/'),
   updateMe: (payload) => client.patch('/auth/me/', payload),
   updateProfile: (payload) => client.patch('/auth/me/profile/', payload),
-  dependents: () => client.get('/auth/dependents/'),
-  addDependent: (payload) => client.post('/auth/dependents/', payload, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  updateDependent: (id, payload) => client.patch(`/auth/dependents/${id}/`, payload, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  revokeDependent: (id) => client.delete(`/auth/dependents/${id}/`),
   doctors: (params) => client.get('/doctors/', { params }),
   doctor: (id) => client.get(`/doctors/${id}/`),
   uploadLicense: (formData) =>
@@ -48,6 +30,49 @@ export const appointmentApi = {
 
 // ===== communication =====
 export const chatApi = {
+  subscribe: (id, onChange) => {
+    if (typeof WebSocket === 'undefined') return () => {}
+    let stopped = false
+    let socket
+    let retry
+    let delay = 1000
+    const connect = () => {
+      if (stopped || !localStorage.getItem('access')) return
+      const url = new URL(client.defaults.baseURL || '/api', window.location.href)
+      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+      url.pathname = `/ws/conversations/${id}/`
+      url.search = ''
+      url.hash = ''
+      // The development API runs on 4000; production serves /ws on the API origin.
+      if (import.meta.env.DEV && url.port === '3000') url.port = '4000'
+      try {
+        socket = new WebSocket(url)
+        socket.onopen = () => socket.send(JSON.stringify({ type: 'authenticate', access_token: localStorage.getItem('access') }))
+        socket.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data)
+            if (message.type === 'ready') delay = 1000
+            if (message.type === 'message.created' || message.type === 'message.receipt') onChange()
+          } catch { /* Polling remains available if a refresh hint cannot be read. */ }
+        }
+        socket.onerror = () => socket.close()
+        socket.onclose = () => {
+          if (!stopped) {
+            retry = setTimeout(connect, delay)
+            delay = Math.min(delay * 2, 30000)
+          }
+        }
+      } catch {
+        if (!stopped) retry = setTimeout(connect, 30000)
+      }
+    }
+    connect()
+    return () => {
+      stopped = true
+      clearTimeout(retry)
+      socket?.close()
+    }
+  },
   conversations: () => client.get('/conversations/'),
   open: (doctorId) => client.post('/conversations/', { doctor_id: doctorId }),
   messages: (id) => client.get(`/conversations/${id}/messages/`),
@@ -66,12 +91,8 @@ export const chatApi = {
 // ===== payments =====
 export const paymentApi = {
   initiate: (payload) => client.post('/payments/initiate/', payload),
-  status: (invoiceNumber) => client.get(`/payments/status/${invoiceNumber}/`),
   invoices: () => client.get('/payments/invoices/'),
   receipt: (id) => client.get(`/payments/invoices/${id}/receipt/`),
-  invoicePdf: (id) => client.get(`/payments/invoices/${id}/pdf/`, { responseType: 'blob' }),
-  sendInvoice: (id) => client.post(`/payments/invoices/${id}/send/`),
-  receiptPdf: (id) => client.get(`/payments/receipts/${id}/pdf/`, { responseType: 'blob' }),
   earnings: () => client.get('/payments/earnings/'),
   withdraw: (amount) => client.post('/payments/withdraw/', { amount }),
 }
@@ -89,6 +110,11 @@ export const prescriptionApi = {
 // ===== services =====
 export const servicesApi = {
   providers: (kind, params) => client.get(`/services/${kind}/`, { params }),
+  medicineTaxonomy: () => client.get('/services/medicine-taxonomy/'),
+  manageMedicineTaxonomy: (organization) => client.get('/services/medicine-taxonomy/manage/', { params: { organization } }),
+  addMedicineTaxonomyNode: (organization, node) => client.post('/services/medicine-taxonomy/manage/', node, { params: { organization } }),
+  updateMedicineTaxonomyNode: (organization, id, changes) =>
+    client.patch(`/services/medicine-taxonomy/manage/${id}/`, changes, { params: { organization } }),
   medicines: (params) => client.get('/services/medicines/', { params }),
   saveMedicine: (payload) => client.post('/services/medicines/', payload),
   deleteMedicine: (id) => client.delete(`/services/medicines/${id}/`),
@@ -97,20 +123,27 @@ export const servicesApi = {
   removeCart: (id) => client.delete(`/services/cart/${id}/`),
   checkout: (payload) => client.post('/services/orders/checkout/', payload),
   orders: () => client.get('/services/orders/'),
-  updateOrder: (id, status) => client.post(`/services/orders/${id}/update/`, { status }),
+  counterProducts: (search) => client.get('/services/pharmacy/counter-sales/', { params: { search } }),
+  counterSale: (sale) => client.post('/services/pharmacy/counter-sales/', sale),
+  pharmacyShifts: () => client.get('/services/pharmacy/shifts/'),
+  openPharmacyShift: (details) => client.post('/services/pharmacy/shifts/', details),
+  closePharmacyShift: (id, details) => client.post(`/services/pharmacy/shifts/${id}/close/`, details),
+  orderReceipt: (id) => client.get(`/services/orders/${id}/receipt/`),
+  recordOrderPayment: (id, payment) => client.post(`/services/orders/${id}/receipt/`, payment),
+  updateOrder: (id, status, extra = {}) => client.post(`/services/orders/${id}/update/`, { status, ...extra }),
+  reverseDispense: (id, fields) => client.post(`/services/pharmacy-orders/${id}/update/`, { ...fields, status: 'reverse_dispense' }),
+  dispensingBatches: (id) => client.get(`/services/pharmacy-orders/${id}/update/`),
+  dispensePrescription: (id, fields) => client.post(`/services/pharmacy-orders/${id}/update/`, { ...fields, status: 'dispense' }),
   pharmacyOrders: () => client.get('/services/pharmacy-orders/'),
-  updatePharmacyOrder: (id, status) =>
-    client.post(`/services/pharmacy-orders/${id}/update/`, { status }),
-  dispensingRecords: (id) => client.get(`/services/pharmacy-orders/${id}/dispensing/`),
-  recordDispensing: (id, payload) => client.post(`/services/pharmacy-orders/${id}/dispensing/`, payload),
+  updatePharmacyOrder: (id, status, extra = {}) =>
+    client.post(`/services/pharmacy-orders/${id}/update/`, { status, ...extra }),
+  reviewPharmacyPrescription: (id, fields) => client.post(`/services/pharmacy-orders/${id}/review/`, fields),
+  requestPharmacySubstitution: (id, fields) => client.post(`/services/pharmacy-orders/${id}/substitutions/`, fields),
+  pharmacySubstitutions: () => client.get('/services/pharmacy-substitutions/'),
+  decidePharmacySubstitution: (id, fields) => client.post(`/services/pharmacy-substitutions/${id}/`, fields),
   suppliers: () => client.get('/services/suppliers/'),
   saveSupplier: (payload) => client.post('/services/suppliers/', payload),
   deleteSupplier: (id) => client.delete(`/services/suppliers/${id}/`),
-  labPanels: (params) => client.get('/services/lab-panels/', { params }),
-  saveLabPanel: (payload) => client.post('/services/lab-panels/', payload),
-  updateLabPanel: (id, payload) => client.patch(`/services/lab-panels/${id}/`, payload),
-  deleteLabPanel: (id) => client.delete(`/services/lab-panels/${id}/`),
-  orderLabPanel: (id, payload) => client.post(`/services/lab-panels/${id}/order/`, payload),
   labTests: (params) => client.get('/services/lab-tests/', { params }),
   saveLabTest: (payload) => client.post('/services/lab-tests/', payload),
   bookLab: (payload) => client.post('/services/lab-orders/', payload),
@@ -120,11 +153,6 @@ export const servicesApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
   myLabOrders: () => client.get('/services/lab-orders/'),
-  labResults: (orderId) => client.get(`/services/lab-orders/${orderId}/results/`),
-  publishLabResult: (orderId, payload) => client.post(`/services/lab-orders/${orderId}/results/`, payload),
-  acknowledgeCriticalResult: (resultId, notes = '') => client.post(`/services/lab-results/${resultId}/acknowledge/`, { notes }),
-  specimenEvents: (orderId) => client.get(`/services/lab-orders/${orderId}/specimen-events/`),
-  addSpecimenEvent: (orderId, payload) => client.post(`/services/lab-orders/${orderId}/specimen-events/`, payload),
   hospitalServices: (params) => client.get('/services/hospital-services/', { params }),
   saveHospitalService: (payload) => client.post('/services/hospital-services/', payload),
   bookHospital: (payload) => client.post('/services/hospital-bookings/', payload),
@@ -136,21 +164,11 @@ export const servicesApi = {
   toggleBed: (id) => client.post(`/services/beds/${id}/toggle/`),
   policies: (params) => client.get('/services/policies/', { params }),
   savePolicy: (payload) => client.post('/services/policies/', payload),
-  updatePolicy: (id, payload) => client.patch(`/services/policies/${id}/`, payload),
-  policyBenefits: (policyId) => client.get(`/services/policies/${policyId}/benefits/`),
-  savePolicyBenefit: (policyId, payload) => client.post(`/services/policies/${policyId}/benefits/`, payload),
-  updatePolicyBenefit: (id, payload) => client.patch(`/services/policy-benefits/${id}/`, payload),
-  deletePolicyBenefit: (id) => client.delete(`/services/policy-benefits/${id}/`),
   verifyCoverage: (payload) => client.post('/services/coverage/verify/', payload),
-  eligibilityHistory: () => client.get('/services/coverage/eligibility-history/'),
-  preauthorizations: (params) => client.get('/services/preauthorizations/', { params }),
-  requestPreauthorization: (payload) => client.post('/services/preauthorizations/', payload),
-  decidePreauthorization: (id, payload) => client.post(`/services/preauthorizations/${id}/decide/`, payload),
   submitClaim: (payload) => client.post('/services/claims/', payload),
   myClaims: () => client.get('/services/claims/'),
-  claimsManage: (params) => client.get('/services/claims/manage/', { params }),
-  decideClaim: (id, payload) => client.post(`/services/claims/${id}/decide/`, typeof payload === 'string' ? { action: payload } : payload),
-  remittances: () => client.get('/services/remittances/'),
+  claimsManage: () => client.get('/services/claims/manage/'),
+  decideClaim: (id, action) => client.post(`/services/claims/${id}/decide/`, { action }),
   myCoverage: () => client.get('/services/coverage/'),
 }
 
@@ -216,9 +234,8 @@ export const clinicalApi = {
   updateEncounter: (id, payload) => client.patch(`/clinical/encounters/${id}/`, payload),
   finalizeEncounter: (id) => client.post(`/clinical/encounters/${id}/finalize/`),
   amendEncounter: (id, payload) => client.post(`/clinical/encounters/${id}/amend/`, payload),
-  referrals: (patientId, params = {}) => client.get('/clinical/referrals/', { params: { ...(patientParam(patientId) || {}), ...params } }),
+  referrals: (patientId) => client.get('/clinical/referrals/', { params: patientParam(patientId) }),
   addReferral: (payload, patientId) => client.post('/clinical/referrals/', { ...payload, ...(patientId ? { patient_id: patientId } : {}) }),
-  referralAction: (id, action, payload = {}) => client.post(`/clinical/referrals/${id}/action/`, { action, ...payload }),
   carePlans: (patientId) => client.get('/clinical/care-plans/', { params: patientParam(patientId) }),
   addCarePlan: (payload, patientId) => client.post('/clinical/care-plans/', { ...payload, ...(patientId ? { patient_id: patientId } : {}) }),
 }
@@ -237,6 +254,10 @@ export const governanceApi = {
   auditEvents: (params) => client.get('/governance/audit/', { params }),
 }
 
+servicesApi.labResults = (orderId) => client.get(`/services/lab-orders/${orderId}/results/`)
+servicesApi.publishLabResult = (orderId, payload) => client.post(`/services/lab-orders/${orderId}/results/`, payload)
+servicesApi.acknowledgeCriticalResult = (resultId, notes = '') => client.post(`/services/lab-results/${resultId}/acknowledge/`, { notes })
+
 
 // ===== facility workforce & patient flow =====
 export const workforceApi = {
@@ -249,8 +270,8 @@ export const workforceApi = {
   patients: (search = '') => client.get('/workforce/patients/', { params: { search } }),
   registerPatient: (payload) => client.post('/workforce/patients/', payload),
   visits: (params) => client.get('/workforce/visits/', { params }),
-  teamSchedule: (params) => client.get('/workforce/team-schedule/', { params }),
   checkIn: (payload) => client.post('/workforce/visits/', payload),
+  visitCareTeam: (id) => client.get(`/workforce/visits/${id}/action/`),
   updateVisit: (id, payload) => client.post(`/workforce/visits/${id}/action/`, payload),
   triage: (params) => client.get('/workforce/triage/', { params }),
   saveTriage: (payload) => client.post('/workforce/triage/', payload),
@@ -267,186 +288,29 @@ export const billingApi = {
   createInvoice: (payload) => client.post('/billing/invoices/', payload),
   recordPayment: (invoiceId, payload) => client.post(`/billing/invoices/${invoiceId}/payments/`, payload),
   receipt: (receiptId) => client.get(`/payments/receipts/${receiptId}/`),
-  invoicePdf: (invoiceId) => client.get(`/payments/invoices/${invoiceId}/pdf/`, { responseType: 'blob' }),
-  receiptPdf: (receiptId) => client.get(`/payments/receipts/${receiptId}/pdf/`, { responseType: 'blob' }),
-  sendInvoice: (invoiceId) => client.post(`/payments/invoices/${invoiceId}/send/`),
   shifts: () => client.get('/billing/shifts/'),
   openShift: (payload = {}) => client.post('/billing/shifts/', payload),
   closeShift: (shiftId, payload = {}) => client.post(`/billing/shifts/${shiftId}/close/`, payload),
-  adjustments: () => client.get('/billing/adjustments/'),
-  requestAdjustment: (payload) => client.post('/billing/adjustments/', payload),
-  actAdjustment: (id, action, note = '') => client.post(`/billing/adjustments/${id}/action/`, { action, note }),
-  refunds: () => client.get('/billing/refunds/'),
-  requestRefund: (payload) => client.post('/billing/refunds/', payload),
-  actRefund: (id, action, note = '') => client.post(`/billing/refunds/${id}/action/`, { action, note }),
 }
 
-// ===== enterprise operations: inpatient, imaging, inventory, subscriptions and support =====
+// Existing portal components consume the new operational API without changing their presentation.
 export const operationsApi = {
-  summary: (params) => client.get('/operations/summary/', { params }),
-  wards: (params) => client.get('/operations/wards/', { params }),
-  createWard: (payload) => client.post('/operations/wards/', payload),
-  beds: (params) => client.get('/operations/beds/', { params }),
-  createBed: (payload) => client.post('/operations/beds/', payload),
-  admissions: (params) => client.get('/operations/admissions/', { params }),
-  createAdmission: (payload) => client.post('/operations/admissions/', payload),
-  actAdmission: (id, payload) => client.post(`/operations/admissions/${id}/action/`, payload),
-  dischargeSummary: (id, payload) => payload ? client.post(`/operations/admissions/${id}/discharge-summary/`, payload) : client.get(`/operations/admissions/${id}/discharge-summary/`),
-  wardTasks: (params) => client.get('/operations/ward-tasks/', { params }),
-  createWardTask: (payload) => client.post('/operations/ward-tasks/', payload),
-  actWardTask: (id, payload) => client.post(`/operations/ward-tasks/${id}/action/`, payload),
-  clinicalRounds: (params) => client.get('/operations/clinical-rounds/', { params }),
-  createClinicalRound: (payload) => client.post('/operations/clinical-rounds/', payload),
-  imagingOrders: (params) => client.get('/operations/imaging-orders/', { params }),
-  createImagingOrder: (payload) => client.post('/operations/imaging-orders/', payload),
-  actImagingOrder: (id, payload) => client.post(`/operations/imaging-orders/${id}/action/`, payload),
-  imagingReport: (id) => client.get(`/operations/imaging-orders/${id}/report/`),
-  saveImagingReport: (id, payload) => client.post(`/operations/imaging-orders/${id}/report/`, payload),
-  inventoryItems: (params) => client.get('/operations/inventory/items/', { params }),
-  createInventoryItem: (payload) => client.post('/operations/inventory/items/', payload),
-  inventoryBatches: (params) => client.get('/operations/inventory/batches/', { params }),
-  createInventoryBatch: (payload) => client.post('/operations/inventory/batches/', payload),
-  stockMovements: (params) => client.get('/operations/inventory/movements/', { params }),
-  createStockMovement: (payload) => client.post('/operations/inventory/movements/', payload),
-  purchaseOrders: (params) => client.get('/operations/procurement/purchase-orders/', { params }),
-  createPurchaseOrder: (payload) => client.post('/operations/procurement/purchase-orders/', payload),
-  actPurchaseOrder: (id, action) => client.post(`/operations/procurement/purchase-orders/${id}/action/`, { action }),
-  subscriptionPlans: (params) => client.get('/operations/subscriptions/plans/', { params }),
-  createSubscriptionPlan: (payload) => client.post('/operations/subscriptions/plans/', payload),
-  subscriptions: () => client.get('/operations/subscriptions/'),
-  subscribe: (payload) => client.post('/operations/subscriptions/', payload),
-  cancelSubscription: (id) => client.post(`/operations/subscriptions/${id}/cancel/`),
-  supportTickets: () => client.get('/operations/support/tickets/'),
-  createSupportTicket: (payload) => client.post('/operations/support/tickets/', payload),
-  actSupportTicket: (id, payload) => client.post(`/operations/support/tickets/${id}/action/`, payload),
-  announcements: () => client.get('/operations/announcements/'),
-  analytics: (params) => client.get('/operations/analytics/enterprise/', { params }),
-  emergencyCases: (params) => client.get('/operations/emergency/cases/', { params }),
-  createEmergencyCase: (payload) => client.post('/operations/emergency/cases/', payload),
-  actEmergencyCase: (id, payload) => client.post(`/operations/emergency/cases/${id}/action/`, payload),
-  ambulanceDispatches: (params) => client.get('/operations/emergency/dispatches/', { params }),
-  createAmbulanceDispatch: (payload) => client.post('/operations/emergency/dispatches/', payload),
-  actAmbulanceDispatch: (id, payload) => client.post(`/operations/emergency/dispatches/${id}/action/`, payload),
-  surgicalCases: (params) => client.get('/operations/theatre/cases/', { params }),
-  createSurgicalCase: (payload) => client.post('/operations/theatre/cases/', payload),
-  actSurgicalCase: (id, payload) => client.post(`/operations/theatre/cases/${id}/action/`, payload),
-  surgicalChecklist: (id) => client.get(`/operations/theatre/cases/${id}/checklist/`),
-  saveSurgicalChecklist: (id, payload) => client.post(`/operations/theatre/cases/${id}/checklist/`, payload),
-  maternityEpisodes: (params) => client.get('/operations/maternity/episodes/', { params }),
-  createMaternityEpisode: (payload) => client.post('/operations/maternity/episodes/', payload),
-  actMaternityEpisode: (id, payload) => client.post(`/operations/maternity/episodes/${id}/action/`, payload),
-  staffShifts: (params) => client.get('/operations/workforce/shifts/', { params }),
-  createStaffShift: (payload) => client.post('/operations/workforce/shifts/', payload),
-  actStaffShift: (id, payload) => client.post(`/operations/workforce/shifts/${id}/action/`, payload),
-  leaveRequests: (params) => client.get('/operations/workforce/leave/', { params }),
-  createLeaveRequest: (payload) => client.post('/operations/workforce/leave/', payload),
-  actLeaveRequest: (id, payload) => client.post(`/operations/workforce/leave/${id}/action/`, payload),
-  qualityIncidents: (params) => client.get('/operations/quality/incidents/', { params }),
-  createQualityIncident: (payload) => client.post('/operations/quality/incidents/', payload),
-  actQualityIncident: (id, payload) => client.post(`/operations/quality/incidents/${id}/action/`, payload),
-  privacyRequests: (params) => client.get('/operations/privacy/requests/', { params }),
-  createPrivacyRequest: (payload) => client.post('/operations/privacy/requests/', payload),
-  actPrivacyRequest: (id, payload) => client.post(`/operations/privacy/requests/${id}/action/`, payload),
-  createAnnouncement: (payload) => client.post('/operations/announcements/', payload),
-}
-
-export const accessApi = {
-  permissions: () => client.get('/workforce/permissions/'),
-  roles: () => client.get('/workforce/roles/'),
-  createRole: (payload) => client.post('/workforce/roles/', payload),
-  updateRole: (id, payload) => client.patch(`/workforce/roles/${id}/`, payload),
-  assignments: () => client.get('/workforce/role-assignments/'),
-  assignRole: (payload) => client.post('/workforce/role-assignments/', payload),
-  revokeAssignment: (id) => client.delete(`/workforce/role-assignments/${id}/`),
-}
-
-export const notificationAdminApi = {
-  devices: () => client.get('/notifications/devices/'),
-  registerDevice: (payload) => client.post('/notifications/devices/', payload),
-  templates: () => client.get('/admin/notification-templates/'),
-  saveTemplate: (payload) => client.post('/admin/notification-templates/', payload),
-  broadcast: (payload) => client.post('/admin/notification-broadcast/', payload),
-}
-
-// ===== enterprise hospital operating system =====
-export const enterpriseApi = {
-  schema: () => client.get('/enterprise/schema/'),
-  summary: () => client.get('/enterprise/summary/'),
-  roleDashboard: () => client.get('/enterprise/dashboard/role/'),
-  lookup: (kind, q = '', params = {}) => client.get('/enterprise/lookups/', { params: { kind, q, ...params } }),
-  readiness: () => client.get('/enterprise/readiness/'),
-  currentContext: () => client.get('/enterprise/context/current/'),
-  contexts: (params) => client.get('/enterprise/contexts/', { params }),
-  createContext: (payload) => client.post('/enterprise/contexts/', payload),
-  activateContext: (id) => client.post(`/enterprise/contexts/${id}/activate/`),
-  delegations: (params) => client.get('/enterprise/delegations/', { params }),
-  createDelegation: (payload) => client.post('/enterprise/delegations/', payload),
-  revokeDelegation: (id) => client.post(`/enterprise/delegations/${id}/revoke/`),
-  records: (params) => client.get('/enterprise/records/', { params }),
-  record: (id) => client.get(`/enterprise/records/${id}/`),
-  createRecord: (payload) => client.post('/enterprise/records/', payload),
-  updateRecord: (id, payload) => client.patch(`/enterprise/records/${id}/`, payload),
-  deleteRecord: (id) => client.delete(`/enterprise/records/${id}/`),
-  transitionRecord: (id, payload) => client.post(`/enterprise/records/${id}/transition/`, payload),
-  attachRecord: (id, formData) => client.post(`/enterprise/records/${id}/attachments/`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  resource: (resource, params) => client.get(`/enterprise/${resource}/`, { params }),
-  createResource: (resource, payload) => client.post(`/enterprise/${resource}/`, payload),
-  updateResource: (resource, id, payload) => client.patch(`/enterprise/${resource}/${id}/`, payload),
-  deleteResource: (resource, id) => client.delete(`/enterprise/${resource}/${id}/`),
-  publishContent: (id) => client.post(`/enterprise/content/${id}/publish/`),
-  patientMergeAction: (id, action) => client.post(`/enterprise/patient-merges/${id}/action/`, { action }),
-  telemedicineAction: (id, payload) => client.post(`/enterprise/telemedicine-sessions/${id}/action/`, payload),
-  eventDeliveryAction: (id, action, reason = '') => client.post(`/enterprise/event-deliveries/${id}/action/`, { action, reason }),
-  verificationAction: (id, payload) => client.post(`/enterprise/verification-automation/${id}/action/`, payload),
-  runReport: (id, parameters = {}) => client.post(`/enterprise/saved-reports/${id}/run/`, { parameters }),
-  issuePartnerToken: (id, payload) => client.post(`/enterprise/partner-apps/${id}/token/`, payload),
-  medicationSafety: (payload) => client.post('/enterprise/clinical/medication-safety/', payload),
-  pacsHealth: (id) => client.post(`/enterprise/pacs-nodes/${id}/health/`),
-  imagingViewer: (id) => client.get(`/enterprise/imaging-studies/${id}/viewer/`),
-  nearestAmbulances: (params) => client.get('/enterprise/ambulances/nearest/', { params }),
-  duplicatePatientScan: (payload = {}) => client.post('/enterprise/records/duplicate-scan/', payload),
-  providerHealth: (id) => client.post(`/enterprise/notification-providers/${id}/health/`),
-  fhirExportMe: () => client.get('/enterprise/fhir/export/me/'),
-  fhirExportPatient: (id) => client.get(`/enterprise/fhir/export/patients/${id}/`),
-  runReplay: (id) => client.post(`/enterprise/replay-requests/${id}/run/`),
-  publicContent: (params) => client.get('/enterprise/public/content/', { params }),
-}
-
-// ===== transactional page journeys =====
-export const journeyApi = {
-  definition: (slug) => client.get(`/journeys/pages/${slug}/definition/`),
-  data: (slug, params = {}) => client.get(`/journeys/pages/${slug}/data/`, { params }),
-  cases: (slug, params = {}) => client.get(`/journeys/pages/${slug}/cases/`, { params }),
-  createCase: (slug, payload) => client.post(`/journeys/pages/${slug}/cases/`, payload),
-  case: (publicId) => client.get(`/journeys/cases/${publicId}/`),
-  updateCase: (publicId, payload) => client.patch(`/journeys/cases/${publicId}/`, payload),
-  act: (publicId, payload) => client.post(`/journeys/cases/${publicId}/actions/`, payload),
-  comments: (publicId) => client.get(`/journeys/cases/${publicId}/comments/`),
-  addComment: (publicId, payload) => client.post(`/journeys/cases/${publicId}/comments/`, payload),
-  dashboard: () => client.get('/journeys/dashboard/'),
-  documents: () => client.get('/journeys/documents/'),
-  operationalActions: (params = {}) => client.get('/journeys/operational-actions/', { params }),
-  releaseAcceptances: (params = {}) => client.get('/journeys/release-acceptances/', { params }),
-  createReleaseAcceptance: (payload) => client.post('/journeys/release-acceptances/', payload),
-  updateReleaseAcceptance: (id, payload) => client.patch(`/journeys/release-acceptances/${id}/`, payload),
-  productionReadiness: (params = {}) => client.get('/journeys/production-readiness/', { params }),
-  documentDownloadUrl: (publicId) => `${client.defaults.baseURL}/journeys/documents/${publicId}/download/`,
-}
-
-export const privilegedAccessApi = {
-  list: (params = {}) => client.get('/governance/privileged-access/', { params }),
-  request: (payload) => client.post('/governance/privileged-access/', payload),
-  decide: (id, payload) => client.post(`/governance/privileged-access/${id}/decision/`, payload),
-}
-
-export const platformAdminApi = {
-  search: (q, kind = 'all') => client.get('/journeys/admin/search/', { params: { q, kind } }),
-  user: (id) => client.get(`/journeys/admin/users/${id}/`),
-  userAction: (id, payload) => client.post(`/journeys/admin/users/${id}/actions/`, payload),
-  contexts: (userId) => client.get(`/journeys/admin/users/${userId}/contexts/`),
-  createContext: (userId, payload) => client.post(`/journeys/admin/users/${userId}/contexts/`, payload),
-  updateContext: (id, payload) => client.patch(`/journeys/admin/contexts/${id}/`, payload),
-  revokeContext: (id) => client.delete(`/journeys/admin/contexts/${id}/`),
-  transferOwnership: (organizationId, payload) => client.post(`/journeys/admin/organizations/${organizationId}/ownership/`, payload),
-  systemHealth: () => client.get('/journeys/admin/system-health/'),
+  actionGet: (resource, id, action) => client.get(`/operations/${resource}/${id}/${action}/`),
+  configureBenefit: (id, payload) => client.patch(`/operations/benefits/${id}/configure/`, payload),
+  reconciliation: (organization) => client.get('/operations/claim-assessments/reconciliation/', { params: { organization } }),
+  downloadDocument: async (id, filename) => {
+    const response = await client.get(`/operations/documents/${id}/download/`, { responseType: 'blob' })
+    const url = URL.createObjectURL(response.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  },
+  context: (organization, patientSearch) => client.get('/operations/context/', { params: { organization: organization || undefined, patient_search: patientSearch } }),
+  list: (resource, params) => client.get(`/operations/${resource}/`, { params }),
+  create: (resource, payload) => client.post(`/operations/${resource}/`, payload),
+  action: (resource, id, action, payload) => client.post(`/operations/${resource}/${id}/${action}/`, payload),
+  offlineChanges: (nodeId, params) => client.get(`/operations/offline-nodes/${nodeId}/changes/`, { params }),
+  offlinePreview: (nodeId, changeId) => client.get(`/operations/offline-nodes/${nodeId}/preview/`, { params: { change: changeId } }),
 }

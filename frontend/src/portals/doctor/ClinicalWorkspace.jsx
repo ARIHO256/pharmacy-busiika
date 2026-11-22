@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { appointmentApi, authApi, clinicalApi, governanceApi } from '../../api/endpoints'
+import { appointmentApi, clinicalApi, governanceApi } from '../../api/endpoints'
 import {
   Alert,
   Badge,
@@ -53,8 +53,7 @@ export default function ClinicalWorkspace() {
   const [vitalsOpen, setVitalsOpen] = useState(false)
   const [vital, setVital] = useState({ display: 'Blood pressure', code: 'blood-pressure', value_text: '', unit: 'mmHg', interpretation: 'unknown' })
   const [referralOpen, setReferralOpen] = useState(false)
-  const [referralProviders, setReferralProviders] = useState([])
-  const [referral, setReferral] = useState({ target_provider: '', target_specialty: '', target_facility: '', reason: '', clinical_summary: '', priority: 'routine' })
+  const [referral, setReferral] = useState({ target_specialty: '', target_facility: '', reason: '', clinical_summary: '', priority: 'routine' })
   const [emergencyOpen, setEmergencyOpen] = useState(false)
   const [emergencyReason, setEmergencyReason] = useState('')
   const [amendmentOpen, setAmendmentOpen] = useState(false)
@@ -72,7 +71,7 @@ export default function ClinicalWorkspace() {
     }
   }
 
-  useEffect(() => { loadAppointments(); authApi.doctors().then((r) => setReferralProviders(r.data || [])).catch(() => setReferralProviders([])) }, [])
+  useEffect(() => { loadAppointments() }, [])
 
   useEffect(() => {
     if (!active) return
@@ -211,7 +210,7 @@ export default function ClinicalWorkspace() {
       await clinicalApi.addReferral({ ...referral, encounter: encounter?.id || null }, active.patient)
       setReferralOpen(false)
       setNotice('Referral created and added to the patient timeline.')
-      setReferral({ target_provider: '', target_specialty: '', target_facility: '', reason: '', clinical_summary: '', priority: 'routine' })
+      setReferral({ target_specialty: '', target_facility: '', reason: '', clinical_summary: '', priority: 'routine' })
     } catch (err) {
       setError(err.response?.data?.detail || 'Referral could not be created.')
     } finally {
@@ -377,10 +376,6 @@ export default function ClinicalWorkspace() {
 
       <Modal open={referralOpen} onClose={() => setReferralOpen(false)} title="Create referral">
         <form onSubmit={createReferral} className="space-y-4">
-          <Select label="Receiving clinician" value={referral.target_provider} onChange={(e) => { const clinician = referralProviders.find((row) => String(row.id) === e.target.value); setReferral({ ...referral, target_provider: e.target.value, target_specialty: clinician?.specialization || referral.target_specialty, target_facility: clinician?.hospital || referral.target_facility }) }}>
-            <option value="">Open referral / receiving facility to assign</option>
-            {referralProviders.map((clinician) => <option key={clinician.id} value={clinician.id}>Dr. {clinician.first_name} {clinician.last_name} · {clinician.specialization || 'General practice'}</option>)}
-          </Select>
           <Input required label="Target specialty" value={referral.target_specialty} onChange={(e) => setReferral({ ...referral, target_specialty: e.target.value })} placeholder="e.g. Neurology" />
           <Input label="Target facility" value={referral.target_facility} onChange={(e) => setReferral({ ...referral, target_facility: e.target.value })} />
           <Select label="Priority" value={referral.priority} onChange={(e) => setReferral({ ...referral, priority: e.target.value })}><option value="routine">Routine</option><option value="urgent">Urgent</option><option value="emergency">Emergency</option></Select>

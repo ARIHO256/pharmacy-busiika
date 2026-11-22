@@ -7,10 +7,6 @@ import CareJourneyBar from '../components/shell/CareJourneyBar'
 import CommandPalette from '../components/shell/CommandPalette'
 import SupportWidget from '../components/shell/SupportWidget'
 import NotificationCenter from '../components/shell/NotificationCenter'
-import ContextSwitcher from '../components/shell/ContextSwitcher'
-import { enterpriseApi } from '../api/endpoints'
-
-const RELEASE_REVIEW_ROLES = new Set(['admin','platform_super_admin','operations_admin','compliance_admin','clinical_safety_admin','medical_director','doctor','nurse','midwife','lab_technician','pharmacist','accountant','finance_manager','records_officer','compliance_officer','it_support'])
 
 function initials(user) {
   const value = [user?.first_name, user?.last_name].filter(Boolean).map((part) => part[0]).join('')
@@ -22,20 +18,19 @@ function roleIcon(role) {
   return {
     patient: 'heart',
     doctor: 'doctor',
-    clinical_officer: 'doctor', dentist: 'doctor', physiotherapist: 'activity', nutritionist: 'heart', psychologist: 'heart', medical_director: 'shield',
-    nurse: 'activity', midwife: 'activity', theatre_nurse: 'activity', paramedic: 'activity',
+    nurse: 'activity',
     receptionist: 'calendar',
     records_officer: 'file',
-    cashier: 'money', accountant: 'money', finance_manager: 'money',
+    cashier: 'money',
     pharmacist: 'pill',
     storekeeper: 'pill',
-    lab_technician: 'flask', radiologist: 'activity', radiographer: 'activity', anaesthetist: 'activity',
-    facility_manager: 'hospital', procurement_officer: 'file', quality_officer: 'shield', compliance_officer: 'shield', hr_officer: 'users', it_support: 'settings', ambulance_dispatcher: 'calendar',
+    lab_technician: 'flask',
+    facility_manager: 'hospital',
     pharmacy: 'pill',
     lab: 'flask',
     hospital: 'hospital',
     insurance: 'insurance',
-    insurance_officer: 'insurance', claims_reviewer: 'insurance',
+    insurance_officer: 'insurance',
     admin: 'shield',
   }[role] || 'heart'
 }
@@ -54,57 +49,28 @@ function isItemActive(pathname, item) {
   return pathname === item.to || pathname.startsWith(`${item.to}/`)
 }
 
-export default function PortalLayout({ title, nav = [], role = 'patient' }) {
-  const { user, logout, activeRole } = useAuth()
+export default function PortalLayout({ title, nav: items = [], role = 'patient', productLabel, home }) {
+  const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const effectiveRole = activeRole || user?.role || role
+  const effectiveRole = user?.role || role
+  const nav = useMemo(() => items.filter((item) => !item.roles || item.roles.includes(effectiveRole)), [items, effectiveRole])
   const experience = getRoleExperience(effectiveRole)
-  const homePath = ROLE_HOME[effectiveRole] || nav[0]?.to || `/${role}`
+  const homePath = home || ROLE_HOME[effectiveRole] || nav[0]?.to || `/${role}`
   const [mobileOpen, setMobileOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
-  const [systemHealth, setSystemHealth] = useState({ state: 'checking', checkedAt: null })
 
-  const visibleNav = useMemo(
-    () => nav.filter((item) => !item.roles || item.roles.includes(effectiveRole)),
-    [nav, effectiveRole],
-  )
-  const groupedNav = useMemo(() => groupNavigation(visibleNav), [visibleNav])
+  const groupedNav = useMemo(() => groupNavigation(nav), [nav])
   const activeItem = useMemo(
-    () => visibleNav.find((item) => isItemActive(location.pathname, item)) || visibleNav[0],
-    [location.pathname, visibleNav],
+    () => nav.find((item) => isItemActive(location.pathname, item)) || nav[0],
+    [location.pathname, nav],
   )
 
   useEffect(() => {
     setMobileOpen(false)
     setProfileOpen(false)
   }, [location.pathname])
-
-  useEffect(() => {
-    let mounted = true
-    let timer
-    const checkHealth = async () => {
-      try {
-        const { data } = await enterpriseApi.readiness()
-        if (mounted) setSystemHealth({ state: data?.status || 'operational', checkedAt: new Date() })
-      } catch {
-        if (mounted) setSystemHealth({ state: navigator.onLine ? 'degraded' : 'offline', checkedAt: new Date() })
-      }
-    }
-    checkHealth()
-    timer = window.setInterval(checkHealth, 60000)
-    const online = () => checkHealth()
-    const offline = () => setSystemHealth({ state: 'offline', checkedAt: new Date() })
-    window.addEventListener('online', online)
-    window.addEventListener('offline', offline)
-    return () => {
-      mounted = false
-      window.clearInterval(timer)
-      window.removeEventListener('online', online)
-      window.removeEventListener('offline', offline)
-    }
-  }, [])
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -126,9 +92,7 @@ export default function PortalLayout({ title, nav = [], role = 'patient' }) {
     navigate('/login')
   }
 
-  const mobileNav = visibleNav.filter((item) => item.group !== 'Settings').slice(0, 5)
-  const healthOperational = ['operational', 'ok', 'ready', 'healthy'].includes(String(systemHealth.state).toLowerCase())
-  const healthLabel = systemHealth.state === 'checking' ? 'Checking' : healthOperational ? 'Operational' : systemHealth.state === 'offline' ? 'Offline' : 'Degraded'
+  const mobileNav = nav.filter((item) => item.group !== 'Settings').slice(0, 5)
 
   return (
     <div className={`healthos-shell role-${effectiveRole}`}>
@@ -142,8 +106,8 @@ export default function PortalLayout({ title, nav = [], role = 'patient' }) {
               <HealthIcon name="heart" size={19} strokeWidth={2.2} />
             </span>
             <span className="healthos-brand-copy">
-              <strong>HealthPilot</strong>
-              <small>HealthOS · {experience.label}</small>
+              <strong>MyDoctor</strong>
+              <small>{productLabel || `HealthOS · ${experience.label}`}</small>
             </span>
           </Link>
           <button type="button" className="healthos-icon-button sidebar-close" onClick={() => setMobileOpen(false)} aria-label="Close navigation">
@@ -200,7 +164,7 @@ export default function PortalLayout({ title, nav = [], role = 'patient' }) {
             <button type="button" className="healthos-icon-button mobile-menu-trigger" onClick={() => setMobileOpen(true)} aria-label="Open navigation">
               <HealthIcon name="menu" size={21}/>
             </button>
-            <Link to={homePath} className="healthos-mobile-brand"><span>M+</span> HealthPilot</Link>
+            <Link to={homePath} className="healthos-mobile-brand"><span>M+</span> MyDoctor</Link>
             <div className="healthos-page-context">
               <span>{experience.label} workspace</span>
               <strong>{activeItem?.label || title}</strong>
@@ -213,12 +177,11 @@ export default function PortalLayout({ title, nav = [], role = 'patient' }) {
               <span>Search workspace</span>
               <kbd>Ctrl K</kbd>
             </button>
-            <ContextSwitcher />
-            <Link to="/status" className={`healthos-system-status is-${healthLabel.toLowerCase()}`} title={`Platform status: ${healthLabel}`}><i /> {healthLabel}</Link>
-            <Link className="healthos-quick-action" to={experience.quickAction.to}>
+            <span className="healthos-system-status" title="Platform services operational"><i /> Connected</span>
+            {(!productLabel || nav.some((item) => item.to === experience.quickAction.to)) && <Link className="healthos-quick-action" to={experience.quickAction.to}>
               <HealthIcon name={experience.quickAction.icon} size={17}/>
               <span>{experience.quickAction.label}</span>
-            </Link>
+            </Link>}
             <NotificationCenter />
             <div className="healthos-profile-wrap">
               <button type="button" className="healthos-profile-button" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen}>
@@ -235,11 +198,8 @@ export default function PortalLayout({ title, nav = [], role = 'patient' }) {
                     <span className={`healthos-user-avatar tone-${experience.avatarTone}`}>{initials(user)}</span>
                     <div><strong>{[user?.first_name, user?.last_name].filter(Boolean).join(' ') || experience.label}</strong><small>{experience.title}</small></div>
                   </div>
-                  <Link to={visibleNav.find((item) => item.label.toLowerCase().includes('profile'))?.to || homePath}><HealthIcon name="user" size={17}/> Profile & settings</Link>
-                  <Link to="/security"><HealthIcon name="shield" size={17}/> Security centre</Link>
-                  <Link to="/notification-settings"><HealthIcon name="bell" size={17}/> Notification preferences</Link>
-                  {RELEASE_REVIEW_ROLES.has(effectiveRole) ? <Link to="/release-acceptance"><HealthIcon name="verified" size={17}/> Release acceptance</Link> : null}
-                  <Link to="/"><HealthIcon name="globe" size={17}/> Public website</Link>
+                  <Link to={nav.find((item) => item.label.toLowerCase().includes('profile'))?.to || homePath}><HealthIcon name="user" size={17}/> Profile & settings</Link>
+                  {!productLabel && <Link to="/"><HealthIcon name="globe" size={17}/> Public website</Link>}
                   <button type="button" onClick={signOut}><HealthIcon name="logout" size={17}/> Sign out</button>
                 </div>
               )}
@@ -247,9 +207,9 @@ export default function PortalLayout({ title, nav = [], role = 'patient' }) {
           </div>
         </header>
 
-        <CareJourneyBar role={effectiveRole} />
+        {!productLabel && <CareJourneyBar role={effectiveRole} />}
 
-        <main id="main-content" className="healthos-main">
+        <main id="main-content" tabIndex={-1} className="healthos-main">
           <section className="healthos-page-heading">
             <div>
               <span className="healthos-page-kicker">{experience.eyebrow}</span>
@@ -258,7 +218,7 @@ export default function PortalLayout({ title, nav = [], role = 'patient' }) {
             </div>
             <div className="healthos-heading-tools">
               <span><HealthIcon name="shield" size={15}/> Role protected</span>
-              <span><HealthIcon name="activity" size={15}/> {healthOperational ? 'Live data' : healthLabel}</span>
+              <span><HealthIcon name="activity" size={15}/> Live data</span>
             </div>
           </section>
           <Outlet />
@@ -275,7 +235,7 @@ export default function PortalLayout({ title, nav = [], role = 'patient' }) {
         <button type="button" onClick={() => setMobileOpen(true)}><HealthIcon name="menu" size={19}/><span>More</span></button>
       </nav>
 
-      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} nav={visibleNav} roleLabel={experience.label} />
+      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} nav={nav} roleLabel={experience.label} />
       <SupportWidget />
     </div>
   )

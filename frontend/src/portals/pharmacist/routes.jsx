@@ -1,50 +1,29 @@
-import { deepNav, deepRoutes } from '../deep/routes'
-import Dashboard from './Dashboard'
+import Counter from '../pharmacy/Counter'
+import ShiftClosing from '../pharmacy/ShiftClosing'
+import { PharmacySafety, PharmacyTransfers } from '../pharmacy/SafetyWorkflows'
+import { Procurement, Stocktake } from '../pharmacy/InventoryWorkflows'
+import MedicineRegister from '../pharmacy/MedicineRegister'
+import StockControl from '../pharmacy/StockControl'
+import Dashboard from '../pharmacy/Dashboard'
 import RxOrders from '../pharmacy/RxOrders'
 import Inventory from '../pharmacy/Inventory'
 import Orders from '../pharmacy/Orders'
 import Suppliers from '../pharmacy/Suppliers'
-import Dispensing from './Dispensing'
-import InventoryControl from '../operations/InventoryControl'
-import Procurement from '../operations/Procurement'
-import SupportCentre from '../operations/SupportCentre'
-import RecordWorkspace from '../enterprise/RecordWorkspace'
-import MedicationSafetyWorkbench from '../enterprise/MedicationSafetyWorkbench'
-import { PHARMACY_CONTROL, PHARMACY_SAFETY } from '../enterprise/coreModules'
-import TeamSchedule from '../staff/TeamSchedule'
-
-export const nav = [
-  { to: '/pharmacist', label: 'Pharmacist Dashboard', icon: 'dashboard', end: true, group: 'Overview', description: 'Prescription, dispensing and inventory workload' },
-  { to: '/pharmacist/dispensing', roles: ['pharmacist'], label: 'Clinical Dispensing', icon: 'pill', group: 'Dispensing', description: 'Review, partial fulfilment, batch traceability and counselling' },
-  { to: '/pharmacist/rx-orders', roles: ['pharmacist'], label: 'Prescription Queue', icon: 'prescription', group: 'Dispensing', description: 'Validate and prepare prescription orders' },
-  { to: '/pharmacist/orders', roles: ['pharmacist'], label: 'Medicine Orders', icon: 'cart', group: 'Dispensing', description: 'Review customer orders and delivery status' },
-  { to: '/pharmacist/inventory', label: 'Medicine Inventory', icon: 'pill', group: 'Inventory', description: 'Products, stock levels, pricing and availability' },
-  { to: '/pharmacist/suppliers', label: 'Suppliers', icon: 'users', group: 'Inventory', description: 'Supplier contacts and supplied products' },
-  { to: '/pharmacist/batches', label: 'Batch & Expiry Control', icon: 'activity', group: 'Inventory', description: 'Batch receiving, FEFO, recalls and movement ledger' },
-  { to: '/pharmacist/procurement', label: 'Procurement', icon: 'file', group: 'Inventory', description: 'Purchase orders and stock replenishment' },
-  { to: '/pharmacist/medication-safety', roles: ['pharmacist'], label: 'Medication Safety Engine', icon: 'shield', group: 'Clinical pharmacy', description: 'Interactions, allergies, contraindications and dosing guidance' },
-  { to: '/pharmacist/safety-events', roles: ['pharmacist'], label: 'Medication Safety Records', icon: 'activity', group: 'Clinical pharmacy', description: 'Adverse reactions, safety reviews and dispensing labels' },
-  { to: '/pharmacist/controlled-stock', label: 'Controlled Stock Governance', icon: 'audit', group: 'Inventory', description: 'Controlled medicines, cold chain, counts and recalls' },
-  { to: '/pharmacist/support', label: 'Support', icon: 'help', group: 'Settings', description: 'Prescription and inventory support' },
-
-  { to: '/pharmacist/team-schedule', label: 'Team Schedule', icon: 'calendar', group: 'Professional tools', description: 'Upcoming appointments for every provider in your organization' },
-  ...deepNav('pharmacist', 'pharmacist', { label: 'Complete page centre', group: 'Professional tools' }),
+export const nav=[
+  { to: '/pharmacist/counter', label: 'New Sale', icon: 'cart', group: 'Sales', roles: ['pharmacy', 'pharmacist', 'cashier'] },
+  { to: '/pharmacist/shifts', label: 'Cash Shifts', icon: 'money', group: 'Sales', roles: ['pharmacy', 'pharmacist', 'cashier'] },
+  { to: '/pharmacist/transfers', label: 'Branch Transfers', roles: ['pharmacist'], icon: 'truck', group: 'Inventory' },
+  { to: '/pharmacist/safety', label: 'Safety & Returns', roles: ['pharmacist'], icon: 'clipboard', group: 'Dispensing' },
+  { to: '/pharmacist/procurement', label: 'Procurement', icon: 'building', group: 'Inventory', description: 'Purchase orders and supplier deliveries' },
+  { to: '/pharmacist/stocktake', label: 'Stocktake', icon: 'clipboard', group: 'Inventory', description: 'Physical counts and stock adjustments' },
+  { to: '/pharmacist/stock-control', label: 'Batch Stock & Safety', icon: 'clipboard', group: 'Inventory', description: 'Review and manage operational workflows' },{to:'/pharmacist',label:'Pharmacist Dashboard',icon:'dashboard',end:true,group:'Overview',description:'Prescription, dispensing and inventory workload'},{to:'/pharmacist/rx-orders',label:'Prescription Queue',icon:'prescription',group:'Dispensing',description:'Validate, prepare and complete prescription orders'},{to:'/pharmacist/orders',label:'Medicine Orders',icon:'cart',group:'Dispensing',description:'Review customer orders and delivery status'},{to:'/pharmacist/inventory',label:'Medicine Inventory',icon:'pill',group:'Inventory',description:'Products, stock levels, pricing and availability'},{to:'/pharmacist/suppliers',label:'Suppliers',icon:'users',group:'Inventory',description:'Supplier contacts and supplied products'},
+  { to: '/pharmacist/medicine-register', label: 'Uganda Medicine Register', icon: 'pill', group: 'Inventory', description: 'Search National Drug Authority reference records' },
 ]
-
-export const routes = [
-  { index: true, element: <Dashboard /> },
-  { path: 'dispensing', element: <Dispensing /> },
-  { path: 'rx-orders', element: <RxOrders /> },
-  { path: 'orders', element: <Orders /> },
-  { path: 'inventory', element: <Inventory /> },
-  { path: 'suppliers', element: <Suppliers /> },
-  { path: 'batches', element: <InventoryControl /> },
+export const routes=[
+  { path: 'counter', element: <Counter /> },
+  { path: 'shifts', element: <ShiftClosing /> },
+  { path: 'transfers', element: <PharmacyTransfers /> },
+  { path: 'safety', element: <PharmacySafety /> },
   { path: 'procurement', element: <Procurement /> },
-  { path: 'medication-safety', element: <MedicationSafetyWorkbench /> },
-  { path: 'safety-events', element: <RecordWorkspace module={PHARMACY_SAFETY} /> },
-  { path: 'controlled-stock', element: <RecordWorkspace module={PHARMACY_CONTROL} /> },
-  { path: 'support', element: <SupportCentre /> },
-
-  { path: 'team-schedule', element: <TeamSchedule /> },
-  ...deepRoutes('pharmacist', 'pharmacist', { title: 'Pharmacy professional page centre' }),
-]
+  { path: 'stocktake', element: <Stocktake /> },
+  { path: 'medicine-register', element: <MedicineRegister /> }, { path: 'stock-control', element: <StockControl /> },{index:true,element:<Dashboard/>},{path:'rx-orders',element:<RxOrders/>},{path:'orders',element:<Orders/>},{path:'inventory',element:<Inventory/>},{path:'suppliers',element:<Suppliers/>}]

@@ -1,21 +1,17 @@
-from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.shortcuts import get_object_or_404
+from django.db.models.deletion import ProtectedError
 from django.db import transaction
 from django.db.models import Q, Sum
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from datetime import timedelta
-from rest_framework import status as drf_status
+from rest_framework import serializers, status as drf_status
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import IsRole, request_role
-from accounts.roles import ALLIED_HEALTH_ROLES, CLINICAL_ROLES, DOCTOR_ROLES, NURSING_ROLES
+from accounts.permissions import IsRole
 from workforce.access import organization_for_user
-from enterprise.access import active_role
-
-from config.uploads import validate_clinical_document_upload
 
 from .models import (
     Bed,
@@ -23,17 +19,9 @@ from .models import (
     HospitalBooking,
     HospitalService,
     InsuranceClaim,
-    InsuranceClaimItem,
-    InsuranceBenefitRule,
-    InsuranceEligibilityCheck,
-    InsurancePreauthorization,
-    InsuranceRemittance,
     InsurancePolicy,
     CriticalResultAcknowledgement,
-    DispensingItem,
-    DispensingRecord,
     LabOrder,
-    LabTestPanel,
     LabResult,
     LabTest,
     Medicine,
@@ -42,7 +30,6 @@ from .models import (
     PatientCoverage,
     PharmacyOrder,
     Supplier,
-    SpecimenEvent,
 )
 from .serializers import (
     BedSerializer,
@@ -50,14 +37,8 @@ from .serializers import (
     HospitalBookingSerializer,
     HospitalServiceSerializer,
     InsuranceClaimSerializer,
-    InsuranceBenefitRuleSerializer,
-    InsuranceEligibilityCheckSerializer,
-    InsurancePreauthorizationSerializer,
-    InsuranceRemittanceSerializer,
     InsurancePolicySerializer,
-    DispensingRecordSerializer,
     LabOrderSerializer,
-    LabTestPanelSerializer,
     LabResultSerializer,
     LabTestSerializer,
     MedicineSerializer,
@@ -66,7 +47,6 @@ from .serializers import (
     PharmacyOrderSerializer,
     ProviderDirectorySerializer,
     SupplierSerializer,
-    SpecimenEventSerializer,
 )
 
 User = get_user_model()
@@ -92,10 +72,9 @@ def provider_account_for(user, expected_role):
     """
     if not user or not user.is_authenticated:
         return None
-    role = active_role(user)
-    if role in {User.Role.PHARMACIST, User.Role.LAB_TECHNICIAN} and not user.is_verified:
+    if user.role in {User.Role.PHARMACIST, User.Role.LAB_TECHNICIAN} and not user.is_verified:
         return None
-    if role == expected_role:
+    if user.role == expected_role:
         return user
     organization = organization_for_user(user)
     if organization and organization.owner_id and organization.owner.role == expected_role:
@@ -114,63 +93,11 @@ def err(message, code=drf_status.HTTP_400_BAD_REQUEST):
     return Response({"detail": message}, status=code)
 
 
-def _advance_visit(patient, to_status, actor, reason=""):
-    """Advance the patient's active outpatient visit after a cross-app event
-    (lab order, result release, dispensing, payment). Never raises."""
-    try:
-        from workforce.services import advance_active_visit
-
-        advance_active_visit(patient, to_status, actor=actor, reason=reason)
-    except Exception:
-        pass
-
-
-def _consume_inventory_for_sale(medicine, qty, order, actor):
-    """Mirror a store sale into operations inventory (see _consume_batches)."""
-    if not medicine.inventory_item_id:
-        return
-    _consume_batches(medicine, qty, actor, f"Online store order #{order.id}", f"store-order-{order.id}")
-
-
-def _consume_batches(medicine, qty, actor, reason, reference):
-    """Consume operations-inventory batches first-expiry-first-out and leave a
-    dispense movement per batch. The StockMovement post_save signal realigns
-    ``Medicine.stock`` to the item total, so staff stock pages and the public
-    store always show the same on-hand quantity.
-    """
-    from operations.models import StockMovement
-
-    remaining = qty
-    batches = (
-        medicine.inventory_item.batches.filter(quantity_available__gt=0, recalled=False)
-        .order_by("expiry_date", "received_at")
-        .select_for_update()
-    )
-    for batch in batches:
-        if remaining <= 0:
-            break
-        take = min(batch.quantity_available, remaining)
-        batch.quantity_available -= take
-        batch.save(update_fields=["quantity_available"])
-        StockMovement.objects.create(
-            batch=batch,
-            movement_type=StockMovement.Type.DISPENSE,
-            quantity=-take,
-            balance_after=batch.quantity_available,
-            reason=reason,
-            reference=reference,
-            created_by=actor,
-        )
-        remaining -= take
-
-
 def verified_provider_directory(role):
-    """Return [{id, org_name, address, district}] for verified providers of `role`.
+    """Return [{id, org_name, address}] for verified providers of `role`.
 
     ProviderProfile lives in accounts (built in parallel) — import lazily and
-    fall back to is_verified users when the model is unavailable. ``district``
-    is an internal filter field only; ProviderDirectorySerializer does not
-    expose it.
+    fall back to is_verified users when the model is unavailable.
     """
     try:
         from accounts.models import ProviderProfile
@@ -181,41 +108,46 @@ def verified_provider_directory(role):
     if ProviderProfile is not None:
         try:
             profiles = (
-                ProviderProfile.objects.filter(status="verified", user__role=role)
+                ProviderProfile.objects.filter(status="verified", user__role=role, user__is_active=True)
                 .select_related("user")
             )
+            affiliations = {}
+            registered = set()
+            if role == User.Role.PHARMACY:
+                from registry.models import Organization
+                for organization in Organization.objects.filter(
+                    owner_id__in=profiles.values("user_id"), organization_type=Organization.Type.PHARMACY,
+                ).select_related("parent_facility"):
+                    registered.add(organization.owner_id)
+                    parent = organization.parent_facility
+                    if organization.active and organization.status == Organization.Status.VERIFIED and (
+                        not parent or parent.active and parent.status == Organization.Status.VERIFIED
+                    ):
+                        affiliations.setdefault(organization.owner_id, parent)
             for p in profiles:
                 name = p.org_name or f"{p.user.first_name} {p.user.last_name}".strip() or p.user.email
-                rows.append({"id": p.user_id, "org_name": name, "address": p.address, "district": p.district})
+                if p.user_id in registered and p.user_id not in affiliations:
+                    continue
+                row = {"id": p.user_id, "org_name": name, "address": p.address}
+                parent = affiliations.get(p.user_id)
+                if parent:
+                    row.update(parent_facility_name=parent.legal_name, parent_facility_type=parent.organization_type)
+                rows.append(row)
             return rows
         except Exception:
             pass
     for u in User.objects.filter(role=role, is_verified=True):
         name = f"{u.first_name} {u.last_name}".strip() or u.email
-        rows.append({"id": u.id, "org_name": name, "address": "", "district": ""})
+        rows.append({"id": u.id, "org_name": name, "address": ""})
     return rows
 
 
 class ProviderDirectoryView(APIView):
-    """Public provider directory with optional search/location filters."""
-
     permission_classes = [AllowAny]
     role = None
 
     def get(self, request):
         data = verified_provider_directory(self.role)
-        search = str(request.query_params.get("search", "")).strip().lower()
-        if search:
-            data = [
-                row for row in data
-                if search in row["org_name"].lower() or search in row["address"].lower()
-            ]
-        location = str(request.query_params.get("location", "")).strip().lower()
-        if location:
-            data = [
-                row for row in data
-                if location in row["address"].lower() or location in row["district"].lower()
-            ]
         return Response(ProviderDirectorySerializer(data, many=True).data)
 
 
@@ -238,6 +170,19 @@ class InsurerListView(ProviderDirectoryView):
 # ---------------------------------------------------------------------------
 # PHARMACY — medicines
 # ---------------------------------------------------------------------------
+class MedicineTaxonomyView(APIView):
+    permission_classes = [IsRole]
+    allowed_roles = ["pharmacy", "pharmacist", "facility_manager", "storekeeper"]
+
+    def get(self, request):
+        from .taxonomy import catalogue
+
+        account, denied = require_provider_account(request, User.Role.PHARMACY)
+        if denied:
+            return denied
+        return Response(catalogue(account.pk))
+
+
 class MedicineListCreateView(APIView):
     allowed_roles = [User.Role.PHARMACY, User.Role.PHARMACIST, User.Role.FACILITY_MANAGER, User.Role.STOREKEEPER]
 
@@ -264,12 +209,12 @@ class MedicineListCreateView(APIView):
         return Response(ser.data)
 
     def post(self, request):
-        ser = MedicineSerializer(data=request.data, context={"request": request})
-        if not ser.is_valid():
-            return err(str(ser.errors))
         pharmacy_account, denied = require_provider_account(request, User.Role.PHARMACY)
         if denied:
             return denied
+        ser = MedicineSerializer(data=request.data, context={"request": request, "pharmacy_id": pharmacy_account.pk})
+        if not ser.is_valid():
+            return err(str(ser.errors))
         med = ser.save(pharmacy=pharmacy_account)
         return Response(
             MedicineSerializer(med, context={"request": request}).data,
@@ -288,10 +233,12 @@ class MedicineDetailView(APIView):
             return None
         return med
 
+    @transaction.atomic
     def put(self, request, pk):
         med = self._get_own(request, pk)
         if med is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
+        med = Medicine.objects.select_for_update().get(pk=med.pk)
         ser = MedicineSerializer(med, data=request.data, partial=True, context={"request": request})
         if not ser.is_valid():
             return err(str(ser.errors))
@@ -304,7 +251,12 @@ class MedicineDetailView(APIView):
         med = self._get_own(request, pk)
         if med is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
-        med.delete()
+        if med.batches.exists():
+            return err("Medicines with batch history cannot be deleted.", 409)
+        try:
+            med.delete()
+        except ProtectedError:
+            return err("This medicine is referenced in pharmacy records and cannot be deleted.", 409)
         return Response(status=drf_status.HTTP_204_NO_CONTENT)
 
 
@@ -330,6 +282,9 @@ class CartListCreateView(APIView):
         medicine = Medicine.objects.filter(pk=medicine_id).first()
         if medicine is None:
             return err("Medicine not found.", drf_status.HTTP_404_NOT_FOUND)
+        from operations.services import online_orderable_batches
+        if not online_orderable_batches(medicine).filter(quantity__gt=0).exists():
+            return err("Online ordering requires classified OTC stock in an available batch at a verified pharmacy.", 409)
         item = CartItem.objects.filter(patient=request.user, medicine=medicine).first()
         if item is not None:
             item.qty += qty
@@ -367,24 +322,27 @@ class CheckoutView(APIView):
         address = request.data.get("address", "") or ""
         if delivery and not address:
             return err("address is required when delivery is requested.")
-        cart = list(CartItem.objects.filter(patient=request.user).select_related("medicine"))
+        User.objects.select_for_update().get(pk=request.user.pk)
+        cart = list(CartItem.objects.filter(patient=request.user).select_related("medicine").order_by("medicine_id"))
         if not cart:
             return err("Cart is empty.")
+
+        locked_medicines = {med.pk: med for med in Medicine.objects.select_for_update().filter(pk__in=[item.medicine_id for item in cart]).order_by("pk")}
+        for item in cart:
+            item.medicine = locked_medicines[item.medicine_id]
 
         groups = {}
         for item in cart:
             groups.setdefault(item.medicine.pharmacy_id, []).append(item)
 
         orders = []
-        delivery_fee = int(getattr(settings, "PHARMACY_DELIVERY_FEE", 0) or 0) if delivery else 0
         for pharmacy_id, items in groups.items():
-            total = sum(i.medicine.price * i.qty for i in items) + delivery_fee
+            total = sum(i.medicine.price * i.qty for i in items)
             order = Order.objects.create(
                 patient=request.user,
                 pharmacy_id=pharmacy_id,
                 total=total,
                 delivery=delivery,
-                delivery_fee=delivery_fee,
                 address=address,
             )
             for i in items:
@@ -395,28 +353,8 @@ class CheckoutView(APIView):
                     price=i.medicine.price,
                     qty=i.qty,
                 )
-                i.medicine.stock = max(0, i.medicine.stock - i.qty)
-                i.medicine.save(update_fields=["stock"])
-                _consume_inventory_for_sale(i.medicine, i.qty, order, request.user)
-            try:
-                from communication.services import notify
-
-                notify(
-                    order.pharmacy,
-                    "New store order",
-                    f"Order #{order.id} for UGX {order.total:,} was placed by {request.user.display_name} — confirm and prepare.",
-                    kind="pharmacy",
-                    action_url="/pharmacy/orders",
-                )
-                notify(
-                    request.user,
-                    "Order placed",
-                    f"Your order #{order.id} for UGX {order.total:,} has been received. The pharmacy will confirm it shortly.",
-                    kind="pharmacy",
-                    action_url="/patient/store",
-                )
-            except Exception:
-                pass
+                from operations.services import allocate_order_stock
+                allocate_order_stock(i.medicine, i.qty, request.user, order.pk)
             orders.append(order)
 
         CartItem.objects.filter(patient=request.user).delete()
@@ -428,10 +366,13 @@ class CheckoutView(APIView):
 
 class OrderListView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = [User.Role.PATIENT, User.Role.PHARMACY, User.Role.PHARMACIST, User.Role.FACILITY_MANAGER]
+    allowed_roles = [User.Role.PATIENT, User.Role.PHARMACY, User.Role.PHARMACIST, User.Role.FACILITY_MANAGER, User.Role.CASHIER]
 
     def get(self, request):
-        if request_role(request) in {User.Role.PHARMACY, User.Role.PHARMACIST, User.Role.FACILITY_MANAGER}:
+        if request.user.role == User.Role.CASHIER:
+            from .pharmacy_sales import staff_pharmacy
+            qs = Order.objects.filter(pharmacy_id=staff_pharmacy(request.user).owner_id)
+        elif request.user.role in {User.Role.PHARMACY, User.Role.PHARMACIST, User.Role.FACILITY_MANAGER}:
             pharmacy_account, denied = require_provider_account(request, User.Role.PHARMACY)
             if denied:
                 return denied
@@ -442,35 +383,74 @@ class OrderListView(APIView):
         return Response(OrderSerializer(qs, many=True, context={"request": request}).data)
 
 
+HANDOVER_FIELDS = ["handed_over_at", "handover_reference", "handed_over_by"]
+
+
+def record_handover(request, order):
+    from operations.serializers import StrictSerializer
+    from operations.views import validated
+
+    class HandoverInput(StrictSerializer):
+        status = serializers.CharField()
+        handover_reference = serializers.CharField(max_length=200)
+
+    values = validated(HandoverInput, request)
+    ensure_handover_stock_safe(order)
+    order.handed_over_at = timezone.now()
+    order.handed_over_by = request.user
+    order.handover_reference = values["handover_reference"]
+
+
+def ensure_handover_stock_safe(order):
+    from operations.models import MedicineBatch
+    movements = order.stock_movements if isinstance(order, Order) else order.dispensing_movements
+    active_dispenses = movements.filter(kind="dispensed", reversal__isnull=True)
+    batch_ids = active_dispenses.values_list("batch_id", flat=True)
+    batches = list(MedicineBatch.objects.select_for_update().filter(pk__in=batch_ids).order_by("pk"))
+    if any(batch.status != "available" or batch.expires_on <= timezone.localdate() for batch in batches):
+        raise ValidationError("The order contains expired, recalled or quarantined stock. Resolve the stock issue before handover.")
+
+
 class OrderUpdateView(APIView):
     permission_classes = [IsRole]
     allowed_roles = [User.Role.PHARMACY, User.Role.PHARMACIST, User.Role.FACILITY_MANAGER, User.Role.STOREKEEPER]
-    ALLOWED = {Order.Status.CONFIRMED, Order.Status.OUT_FOR_DELIVERY, Order.Status.DELIVERED, Order.Status.CANCELLED}
+    ALLOWED = {Order.Status.CONFIRMED, Order.Status.READY, Order.Status.DISPATCHED, Order.Status.DELIVERED, Order.Status.CANCELLED}
 
+    @transaction.atomic
     def post(self, request, pk):
         pharmacy_account, denied = require_provider_account(request, User.Role.PHARMACY)
         if denied:
             return denied
-        order = Order.objects.filter(pk=pk, pharmacy=pharmacy_account).first()
+        order = Order.objects.select_for_update().filter(pk=pk, pharmacy=pharmacy_account).first()
         if order is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
         new_status = request.data.get("status")
         if new_status not in self.ALLOWED:
-            return err("status must be one of confirmed|out_for_delivery|delivered|cancelled.")
+            return err("Select a valid order status.")
+        if new_status == order.status:
+            return Response(OrderSerializer(order, context={"request": request}).data)
+        transitions = {
+            "pending": {"confirmed", "cancelled"},
+            "confirmed": {"dispatched" if order.delivery else "ready", "cancelled"},
+            "ready": {"delivered", "cancelled"},
+            "dispatched": {"delivered"},
+        }
+        if new_status not in transitions.get(order.status, set()):
+            return err("This order cannot make that status transition.", 409)
+        from operations.services import event, restore_order_stock
+        if new_status == "cancelled":
+            if order.invoice_id:
+                return err("This order has a recorded payment and cannot be cancelled here.", 409)
+            restore_order_stock(order, request.user)
         order.status = new_status
-        order.save(update_fields=["status"])
-        try:
-            from communication.services import notify
-
-            notify(
-                order.patient,
-                f"Order #{order.id} {order.get_status_display().lower()}",
-                f"Your pharmacy order of UGX {order.total:,} is now {order.get_status_display().lower()}.",
-                kind="pharmacy",
-                action_url="/patient/store",
-            )
-        except Exception:
-            pass
+        fields = ["status"]
+        if new_status in {"ready", "dispatched"}:
+            ensure_handover_stock_safe(order)
+        if new_status == "delivered":
+            record_handover(request, order)
+            fields += HANDOVER_FIELDS
+        order.save(update_fields=fields)
+        event(order, request.user, "order.transition", status=new_status)
         return Response(OrderSerializer(order, context={"request": request}).data)
 
 
@@ -491,168 +471,157 @@ class PharmacyOrderListView(APIView):
 
 class PharmacyOrderUpdateView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = [User.Role.PHARMACY, User.Role.PHARMACIST]
+    allowed_roles = [User.Role.PHARMACY, User.Role.PHARMACIST, User.Role.FACILITY_MANAGER, User.Role.STOREKEEPER]
     ALLOWED = {
         PharmacyOrder.Status.PREPARED,
         PharmacyOrder.Status.DELIVERED,
         PharmacyOrder.Status.REJECTED,
     }
 
+    def get(self, request, pk):
+        from operations.access import organizations, require_role
+        from operations.models import MedicineBatch
+
+        require_role(request.user, {"pharmacist"})
+        pharmacy, denied = require_provider_account(request, User.Role.PHARMACY)
+        if denied:
+            return denied
+        order = get_object_or_404(PharmacyOrder, pk=pk, pharmacy=pharmacy)
+        prescription = order.get_prescription()
+        if prescription is None or prescription.patient_id != order.patient_id:
+            return err("No valid prescription is linked to this order.", 409)
+        substitutions = dict(order.substitutions.filter(status="approved", prescription_version=prescription.version)
+                             .values_list("item_id", "replacement_id"))
+        names = {item.medicine_name.strip().casefold() for item in prescription.items.all() if item.pk not in substitutions}
+        replacements = set(substitutions.values())
+        scope = organizations(request.user).filter(owner=pharmacy)
+        batches = MedicineBatch.objects.filter(
+            organization__in=scope, status="available", quantity__gt=0, expires_on__gt=timezone.localdate(),
+        ).select_related("medicine").order_by("expires_on", "pk")
+        return Response([{
+            "id": batch.pk, "medicine_name": batch.medicine.name, "batch_number": batch.batch_number,
+            "quantity": batch.quantity, "expires_on": batch.expires_on, "controlled": batch.controlled,
+            "medicine": batch.medicine_id,
+        } for batch in batches if batch.medicine_id in replacements or batch.medicine.name.strip().casefold() in names])
+
+    @transaction.atomic
     def post(self, request, pk):
         pharmacy_account, denied = require_provider_account(request, User.Role.PHARMACY)
         if denied:
             return denied
-        order = PharmacyOrder.objects.filter(pk=pk, pharmacy=pharmacy_account).first()
+        order = PharmacyOrder.objects.select_for_update().filter(pk=pk, pharmacy=pharmacy_account).first()
         if order is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
         new_status = request.data.get("status")
+        if new_status == "dispense":
+            return self.dispense(request, order)
+        if new_status == "reverse_dispense":
+            return self.reverse_dispense(request, order)
         if new_status not in self.ALLOWED:
             return err("status must be one of prepared|delivered|rejected.")
+        if new_status != order.status and new_status not in {
+            PharmacyOrder.Status.NEW: {PharmacyOrder.Status.PREPARED, PharmacyOrder.Status.REJECTED},
+            PharmacyOrder.Status.PREPARED: {PharmacyOrder.Status.DELIVERED},
+        }.get(order.status, set()):
+            return err("This prescription order cannot make that status transition.", 409)
+        if new_status == PharmacyOrder.Status.DELIVERED:
+            prescription = order.get_prescription()
+            if not prescription or prescription.patient_id != order.patient_id:
+                return err("No valid prescription is linked to this order.", 409)
+            if order.status != PharmacyOrder.Status.DELIVERED:
+                quantities = {
+                    row["prescription_item_id"]: -row["quantity"]
+                    for row in order.dispensing_movements.filter(kind="dispensed", reversal__isnull=True)
+                    .values("prescription_item_id").annotate(quantity=Sum("quantity"))
+                }
+                items = list(prescription.items.all())
+                if (prescription.status != "dispensed" or not items
+                        or any(quantities.get(item.pk, 0) != item.quantity for item in items)):
+                    return err("Complete dispensing on this pharmacy order before recording handover.", 409)
+        if new_status == "delivered":
+            from operations.access import require_role
+            require_role(request.user, {"pharmacist"})
         order.status = new_status
-        order.save(update_fields=["status"])
+        fields = ["status"]
+        if new_status == "delivered" and order.handed_over_at is None:
+            record_handover(request, order)
+            fields += HANDOVER_FIELDS
+        order.save(update_fields=fields)
         return Response(PharmacyOrderSerializer(order, context={"request": request}).data)
 
 
+    def dispense(self, request, order):
+        from operations.access import organizations, require_role
+        from operations.models import MedicineBatch
+        from operations.services import move_stock
 
-
-class DispensingRecordListCreateView(APIView):
-    permission_classes = [IsRole]
-    allowed_roles = [User.Role.PHARMACY, User.Role.PHARMACIST, User.Role.FACILITY_MANAGER]
-
-    def _order(self, request, pk):
-        pharmacy_account = provider_account_for(request.user, User.Role.PHARMACY)
-        if pharmacy_account is None:
-            return None
-        return PharmacyOrder.objects.filter(pk=pk, pharmacy=pharmacy_account).select_related(
-            "patient", "pharmacy"
-        ).prefetch_related("dispensing_records__items").first()
-
-    def get(self, request, pk):
-        order = self._order(request, pk)
-        if order is None:
-            return err("Prescription order not found.", drf_status.HTTP_404_NOT_FOUND)
-        records = order.dispensing_records.select_related("pharmacist").prefetch_related("items")
-        return Response(DispensingRecordSerializer(records, many=True).data)
-
-    @transaction.atomic
-    def post(self, request, pk):
-        if request_role(request) not in {User.Role.PHARMACY, User.Role.PHARMACIST}:
-            return err("Only a pharmacy owner or verified pharmacist may dispense.", drf_status.HTTP_403_FORBIDDEN)
-        order = self._order(request, pk)
-        if order is None:
-            return err("Prescription order not found.", drf_status.HTTP_404_NOT_FOUND)
-        serializer = DispensingRecordSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        items = serializer.validated_data.pop("items", [])
-        status_value = serializer.validated_data.get("status", DispensingRecord.Status.REVIEWED)
-
-        # Prevent duplicate over-dispensing across completed or partial records.
-        historical = {}
-        for row in DispensingItem.objects.filter(
-            record__pharmacy_order=order,
-            record__status__in=[DispensingRecord.Status.PARTIAL, DispensingRecord.Status.DISPENSED],
-        ):
-            key = row.prescription_item_id or row.medicine_name.lower()
-            historical[key] = historical.get(key, 0) + row.dispensed_quantity
-        for item in items:
-            prescribed = item.get("prescribed_quantity", 0)
-            dispensed = item.get("dispensed_quantity", 0)
-            key = item.get("prescription_item_id") or item.get("medicine_name", "").lower()
-            if prescribed and historical.get(key, 0) + dispensed > prescribed:
-                return err(f"Dispensed quantity exceeds the prescription for {item.get('medicine_name')}.")
-            if dispensed:
-                medicine = Medicine.objects.select_for_update().filter(
-                    pharmacy=order.pharmacy, name__iexact=item.get("medicine_name", "")
-                ).first()
-                if medicine:
-                    if medicine.stock < dispensed:
-                        return err(f"Insufficient stock for {medicine.name}.")
-                    medicine.stock -= dispensed
-                    medicine.save(update_fields=["stock"])
-                    if medicine.inventory_item_id:
-                        _consume_batches(
-                            medicine,
-                            dispensed,
-                            request.user,
-                            f"Prescription dispensing, pharmacy order #{order.id}",
-                            f"pharmacy-order-{order.id}",
-                        )
-
-        record = DispensingRecord.objects.create(
-            pharmacy_order=order,
-            pharmacist=request.user,
-            dispensed_at=timezone.now() if status_value in {DispensingRecord.Status.PARTIAL, DispensingRecord.Status.DISPENSED} else None,
-            **serializer.validated_data,
-        )
-        DispensingItem.objects.bulk_create([DispensingItem(record=record, **item) for item in items])
+        require_role(request.user, {"pharmacist"})
+        if order.status != PharmacyOrder.Status.PREPARED:
+            return err("The prescription order must be prepared for dispensing.", 409)
         prescription = order.get_prescription()
-        if prescription is not None:
-            for item in items:
-                item_id = item.get("prescription_item_id")
-                if not item_id:
-                    continue
-                rx_item = prescription.items.select_for_update().filter(pk=item_id).first()
-                if rx_item is None:
-                    continue
-                key = item_id
-                rx_item.dispensed_quantity = min(
-                    rx_item.quantity, historical.get(key, 0) + item.get("dispensed_quantity", 0)
-                )
-                rx_item.save(update_fields=["dispensed_quantity"])
-            try:
-                from prescriptions.models import Prescription
-                remaining = any(row.dispensed_quantity < row.quantity for row in prescription.items.all())
-                prescription.status = (
-                    Prescription.Status.PARTIALLY_DISPENSED if remaining
-                    else Prescription.Status.DISPENSED
-                )
-                if status_value in {DispensingRecord.Status.CANCELLED, DispensingRecord.Status.HELD, DispensingRecord.Status.CLARIFICATION}:
-                    prescription.status = Prescription.Status.ISSUED
-                prescription.save(update_fields=["status"])
-            except Exception:
-                pass
-        if status_value == DispensingRecord.Status.DISPENSED:
-            order.status = PharmacyOrder.Status.DELIVERED
-        elif status_value == DispensingRecord.Status.PARTIAL:
-            order.status = PharmacyOrder.Status.PREPARED
-        elif status_value == DispensingRecord.Status.CANCELLED:
-            order.status = PharmacyOrder.Status.REJECTED
-        elif status_value == DispensingRecord.Status.REVIEWED:
-            order.status = PharmacyOrder.Status.PREPARED
-        order.save(update_fields=["status"])
-        if status_value in {DispensingRecord.Status.DISPENSED, DispensingRecord.Status.PARTIAL}:
-            _advance_visit(order.patient, "billing", request.user, f"Prescription {record.get_status_display().lower()} at pharmacy")
-        try:
-            from communication.services import notify
-            notify(
-                order.patient,
-                "Prescription dispensing update",
-                f"Your prescription is now {record.get_status_display().lower()}.",
-                kind="pharmacy",
-                action_url="/patient/prescriptions",
-            )
-        except Exception:
-            pass
-        try:
-            from governance.services import audit
-            from interoperability.services import emit_event
-            audit(
-                actor=request.user, patient=order.patient, action="pharmacy.dispensing.recorded",
-                resource=record, purpose="treatment", request=request,
-                metadata={"status": status_value, "item_count": len(items)},
-            )
-            emit_event(
-                "pharmacy.dispensing.recorded", record,
-                {"pharmacy_order_id": order.id, "status": status_value, "patient_id": order.patient_id},
-                actor=request.user, patient=order.patient, request=request,
-            )
-        except Exception:
-            pass
-        record = DispensingRecord.objects.select_related("pharmacist").prefetch_related("items").get(pk=record.pk)
-        return Response(DispensingRecordSerializer(record).data, status=drf_status.HTTP_201_CREATED)
+        if prescription is None or prescription.patient_id != order.patient_id:
+            return err("No valid prescription is linked to this order.", 409)
+
+        class DispenseInput(serializers.Serializer):
+            item = serializers.IntegerField(min_value=1)
+            batch = serializers.IntegerField(min_value=1)
+            quantity = serializers.IntegerField(min_value=1)
+            reason = serializers.CharField(max_length=2000)
+            reference = serializers.UUIDField()
+            witness = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(is_active=True), required=False)
+            alerts_reviewed = serializers.BooleanField(default=False)
+
+        data = DispenseInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        values = data.validated_data
+        item = get_object_or_404(prescription.items.all(), pk=values["item"])
+        batch = get_object_or_404(
+            MedicineBatch, pk=values["batch"],
+            organization__in=organizations(request.user).filter(owner=order.pharmacy),
+        )
+        if batch.medicine.sale_type == Medicine.SaleType.UNCLASSIFIED:
+            return err("Classify this product before dispensing.", 409)
+        if batch.medicine.sale_type == Medicine.SaleType.CONTROLLED and not batch.controlled:
+            return err("Use a controlled batch for a controlled product.", 409)
+        if not hasattr(order, "safety_review") or order.safety_review.prescription_version != prescription.version:
+            return err("Record pharmacist review and counselling before dispensing.", 409)
+        if order.safety_review.product_ids.get(str(item.pk)) != batch.medicine_id:
+            return err("Select a batch of the product verified during pharmacist review.", 409)
+        if order.safety_review.medication_check.get("alerts") and not values["alerts_reviewed"]:
+            return err("Review the recorded medication alerts before dispensing.", 409)
+        move_stock(batch, request.user, quantity=-values["quantity"], kind="dispensed",
+                   reason=values["reason"], reference=values["reference"], patient=order.patient,
+                   witness=values.get("witness"), prescription_item=item, pharmacy_order=order)
+        return Response(PharmacyOrderSerializer(order, context={"request": request}).data)
 
 
-# ---------------------------------------------------------------------------
+    def reverse_dispense(self, request, order):
+        from operations.access import require_role
+        from operations.services import reverse_unhanded_dispense
+
+        require_role(request.user, {"pharmacist"})
+        if order.status != PharmacyOrder.Status.PREPARED:
+            return err("Only a prepared order can have an unhanded dispensing reversed.", 409)
+
+        class ReversalInput(serializers.Serializer):
+            movement = serializers.IntegerField(min_value=1)
+            reason = serializers.CharField(max_length=2000)
+            unhanded = serializers.BooleanField()
+            witness = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(is_active=True), required=False)
+
+        serializer = ReversalInput(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        if not values["unhanded"]:
+            return err("Confirm the medicine never left pharmacy custody.")
+        movement = get_object_or_404(
+            order.dispensing_movements.select_related("batch", "prescription_item"),
+            pk=values["movement"], kind="dispensed", prescription_item__isnull=False,
+        )
+        reverse_unhanded_dispense(movement, request.user, reason=values["reason"], witness=values.get("witness"))
+        return Response(PharmacyOrderSerializer(order, context={"request": request}).data)
+
+
 # PHARMACY — suppliers
 # ---------------------------------------------------------------------------
 class SupplierListCreateView(APIView):
@@ -667,7 +636,7 @@ class SupplierListCreateView(APIView):
         return Response(SupplierSerializer(qs, many=True).data)
 
     def post(self, request):
-        ser = SupplierSerializer(data=request.data)
+        ser = SupplierSerializer(data=request.data, context={"request": request})
         if not ser.is_valid():
             return err(str(ser.errors))
         pharmacy_account, denied = require_provider_account(request, User.Role.PHARMACY)
@@ -691,7 +660,7 @@ class SupplierDetailView(APIView):
         supplier = self._get_own(request, pk)
         if supplier is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
-        ser = SupplierSerializer(supplier, data=request.data, partial=True)
+        ser = SupplierSerializer(supplier, data=request.data, partial=True, context={"request": request})
         if not ser.is_valid():
             return err(str(ser.errors))
         ser.save()
@@ -703,194 +672,16 @@ class SupplierDetailView(APIView):
         supplier = self._get_own(request, pk)
         if supplier is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
-        supplier.delete()
+        try:
+            supplier.delete()
+        except ProtectedError:
+            return err("This supplier is referenced in purchasing or inventory records and cannot be deleted.", 409)
         return Response(status=drf_status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------------
 # LAB
 # ---------------------------------------------------------------------------
-
-
-class LabTestPanelListCreateView(APIView):
-    allowed_roles = [User.Role.LAB, User.Role.LAB_TECHNICIAN, User.Role.FACILITY_MANAGER]
-
-    def get_permissions(self):
-        return [AllowAny()] if self.request.method == "GET" else [IsRole()]
-
-    def get(self, request):
-        qs = LabTestPanel.objects.filter(active=True).select_related("lab").prefetch_related("items__test")
-        lab_id = request.query_params.get("lab")
-        if lab_id:
-            qs = qs.filter(lab_id=lab_id)
-        elif request.user.is_authenticated:
-            account = provider_account_for(request.user, User.Role.LAB)
-            if account is not None:
-                qs = LabTestPanel.objects.filter(lab=account).select_related("lab").prefetch_related("items__test")
-        return Response(LabTestPanelSerializer(qs, many=True).data)
-
-    @transaction.atomic
-    def post(self, request):
-        lab_account, denied = require_provider_account(request, User.Role.LAB)
-        if denied:
-            return denied
-        serializer = LabTestPanelSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        tests = [item["test"] for item in serializer.validated_data.get("items", [])]
-        if any(test.lab_id != lab_account.id for test in tests):
-            return err("Every panel test must belong to this laboratory.")
-        panel = serializer.save(lab=lab_account)
-        return Response(LabTestPanelSerializer(panel).data, status=drf_status.HTTP_201_CREATED)
-
-
-class LabTestPanelDetailView(APIView):
-    permission_classes = [IsRole]
-    allowed_roles = [User.Role.LAB, User.Role.LAB_TECHNICIAN, User.Role.FACILITY_MANAGER]
-
-    def _get(self, request, pk):
-        account = provider_account_for(request.user, User.Role.LAB)
-        return LabTestPanel.objects.filter(pk=pk, lab=account).prefetch_related("items__test").first() if account else None
-
-    @transaction.atomic
-    def put(self, request, pk):
-        panel = self._get(request, pk)
-        if panel is None:
-            return err("Panel not found.", drf_status.HTTP_404_NOT_FOUND)
-        serializer = LabTestPanelSerializer(panel, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        tests = [item["test"] for item in serializer.validated_data.get("items", [])]
-        if any(test.lab_id != panel.lab_id for test in tests):
-            return err("Every panel test must belong to this laboratory.")
-        panel = serializer.save()
-        return Response(LabTestPanelSerializer(panel).data)
-
-    patch = put
-
-    def delete(self, request, pk):
-        panel = self._get(request, pk)
-        if panel is None:
-            return err("Panel not found.", drf_status.HTTP_404_NOT_FOUND)
-        panel.active = False
-        panel.save(update_fields=["active", "updated_at"])
-        return Response(status=drf_status.HTTP_204_NO_CONTENT)
-
-
-class LabTestPanelOrderView(APIView):
-    permission_classes = [IsRole]
-    allowed_roles = list({User.Role.PATIENT} | CLINICAL_ROLES)
-
-    @transaction.atomic
-    def post(self, request, pk):
-        panel = LabTestPanel.objects.filter(pk=pk, active=True, lab__is_verified=True).select_related("lab").prefetch_related("items__test").first()
-        if panel is None:
-            return err("Active laboratory panel not found.", drf_status.HTTP_404_NOT_FOUND)
-        if request_role(request) == User.Role.PATIENT:
-            patient = request.user
-            referring_doctor = None
-        else:
-            patient = User.objects.filter(pk=request.data.get("patient_id") or request.data.get("patient"), role=User.Role.PATIENT).first()
-            if patient is None:
-                return err("A patient is required.")
-            referring_doctor = request.user
-        common = {
-            "patient": patient,
-            "lab": panel.lab,
-            "referring_doctor": referring_doctor,
-            "referring_facility": str(request.data.get("referring_facility", "")).strip(),
-            "clinical_indication": str(request.data.get("clinical_indication", "")).strip(),
-            "provisional_diagnosis": str(request.data.get("provisional_diagnosis", "")).strip(),
-            "priority": request.data.get("priority") or LabOrder.Priority.ROUTINE,
-        }
-        orders = [LabOrder.objects.create(test=item.test, specimen_type=item.test.sample_type, **common) for item in panel.items.all()]
-        _advance_visit(patient, "laboratory", request.user, f"Laboratory panel {panel.name} ordered")
-        try:
-            from communication.services import notify
-            notify(
-                patient, "Laboratory panel ordered",
-                f"{panel.name} ({len(orders)} tests) has been ordered at {panel.lab.display_name}.",
-                kind="laboratory", action_url="/patient/health-record",
-            )
-            notify(
-                panel.lab, "New laboratory panel order",
-                f"{panel.name} ({len(orders)} tests) for {patient.display_name}.",
-                kind="laboratory", action_url="/lab/orders",
-            )
-        except Exception:
-            pass
-        return Response(LabOrderSerializer(orders, many=True, context={"request": request}).data, status=drf_status.HTTP_201_CREATED)
-
-
-class SpecimenEventListCreateView(APIView):
-    permission_classes = [IsRole]
-    allowed_roles = [
-        User.Role.PATIENT, User.Role.LAB, User.Role.LAB_TECHNICIAN, User.Role.FACILITY_MANAGER,
-        User.Role.DOCTOR, User.Role.CLINICAL_OFFICER, User.Role.MEDICAL_DIRECTOR, User.Role.ADMIN,
-    ]
-
-    def _order(self, request, pk):
-        order = LabOrder.objects.filter(pk=pk).select_related("patient", "lab", "referring_doctor").first()
-        if order is None:
-            return None
-        allowed = (
-            request_role(request) == User.Role.ADMIN
-            or request.user == order.patient
-            or request.user == order.referring_doctor
-            or provider_account_for(request.user, User.Role.LAB) == order.lab
-        )
-        return order if allowed else None
-
-    def get(self, request, pk):
-        order = self._order(request, pk)
-        if order is None:
-            return err("Specimen record not found or unavailable.", drf_status.HTTP_404_NOT_FOUND)
-        return Response(SpecimenEventSerializer(order.specimen_events.select_related("performed_by"), many=True).data)
-
-    @transaction.atomic
-    def post(self, request, pk):
-        if request_role(request) not in {User.Role.LAB, User.Role.LAB_TECHNICIAN}:
-            return err("Only laboratory staff can update specimen custody.", drf_status.HTTP_403_FORBIDDEN)
-        order = self._order(request, pk)
-        if order is None:
-            return err("Specimen record not found.", drf_status.HTTP_404_NOT_FOUND)
-        serializer = SpecimenEventSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        barcode = serializer.validated_data.get("barcode") or order.specimen_id or f"LAB-{order.id:08d}"
-        event = serializer.save(order=order, performed_by=request.user, barcode=barcode)
-        fields = []
-        if not order.specimen_id:
-            order.specimen_id = barcode
-            fields.append("specimen_id")
-        mapping = {
-            SpecimenEvent.Type.COLLECTED: LabOrder.Status.SAMPLE_COLLECTED,
-            SpecimenEvent.Type.RECEIVED: LabOrder.Status.SAMPLE_RECEIVED,
-            SpecimenEvent.Type.PROCESSING: LabOrder.Status.PROCESSING,
-            SpecimenEvent.Type.REJECTED: LabOrder.Status.REJECTED,
-        }
-        if event.event_type in mapping:
-            order.status = mapping[event.event_type]
-            fields.append("status")
-        if event.event_type == SpecimenEvent.Type.COLLECTED:
-            order.collected_by = request.user
-            order.collected_at = event.occurred_at
-            fields.extend(["collected_by", "collected_at"])
-        elif event.event_type == SpecimenEvent.Type.RECEIVED:
-            order.received_at = event.occurred_at
-            fields.append("received_at")
-        elif event.event_type == SpecimenEvent.Type.REJECTED:
-            order.rejection_reason = event.notes
-            fields.append("rejection_reason")
-        if fields:
-            order.save(update_fields=list(dict.fromkeys(fields + ["updated_at"])))
-        try:
-            from governance.services import audit
-            from interoperability.services import emit_event
-            audit(actor=request.user, patient=order.patient, action=f"laboratory.specimen.{event.event_type}", resource=event, purpose="treatment", request=request)
-            emit_event(f"laboratory.specimen.{event.event_type}", event, {"lab_order_id": order.id, "barcode": barcode}, actor=request.user, patient=order.patient, request=request)
-        except Exception:
-            pass
-        return Response(SpecimenEventSerializer(event).data, status=drf_status.HTTP_201_CREATED)
-
-
 class LabTestListCreateView(APIView):
     allowed_roles = [User.Role.LAB, User.Role.LAB_TECHNICIAN, User.Role.FACILITY_MANAGER]
 
@@ -958,16 +749,24 @@ class LabTestDetailView(APIView):
 
 class LabOrderListCreateView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = list({User.Role.PATIENT} | CLINICAL_ROLES)
+    allowed_roles = [User.Role.PATIENT, User.Role.DOCTOR, User.Role.NURSE]
 
     def get(self, request):
-        if request_role(request) == User.Role.PATIENT:
+        if request.user.role == User.Role.PATIENT:
             qs = LabOrder.objects.filter(patient=request.user)
         else:
-            qs = LabOrder.objects.filter(referring_doctor=request.user)
-        qs = qs.select_related("test", "lab", "patient", "referring_doctor").order_by("-created_at")
+            from operations.access import organizations
+            scope = organizations(request.user)
+            if request.user.role == User.Role.DOCTOR:
+                qs = LabOrder.objects.filter(
+                    Q(referring_doctor=request.user) | Q(visit__assigned_doctor=request.user, visit__organization__in=scope)
+                )
+            else:
+                qs = LabOrder.objects.filter(visit__assigned_nurse=request.user, visit__organization__in=scope)
+        qs = qs.select_related("test", "lab", "patient", "referring_doctor", "visit").order_by("-created_at")
         return Response(LabOrderSerializer(qs, many=True, context={"request": request}).data)
 
+    @transaction.atomic
     def post(self, request):
         lab_id = request.data.get("lab_id") or request.data.get("lab")
         test_id = request.data.get("test_id") or request.data.get("test")
@@ -977,7 +776,8 @@ class LabOrderListCreateView(APIView):
         test = LabTest.objects.filter(pk=test_id, lab=lab).first()
         if test is None:
             return err("Test not found for the selected laboratory.", drf_status.HTTP_404_NOT_FOUND)
-        if request_role(request) == User.Role.PATIENT:
+        visit = None
+        if request.user.role == User.Role.PATIENT:
             patient = request.user
             referring_doctor = None
         else:
@@ -985,9 +785,26 @@ class LabOrderListCreateView(APIView):
             patient = User.objects.filter(pk=patient_id, role=User.Role.PATIENT).first()
             if patient is None:
                 return err("patient_id is required for a clinical referral.")
+            if request.user.role != User.Role.DOCTOR or not request.user.is_verified:
+                return err("A verified ordering doctor is required.", 403)
+            from clinical.services import can_access_patient
+            from operations.access import organizations
+            from workforce.models import PatientVisit
+
+            visit_id = request.data.get("visit_id")
+            if visit_id:
+                visit = get_object_or_404(
+                    PatientVisit.objects.select_for_update().filter(
+                        patient=patient, assigned_doctor=request.user, organization__in=organizations(request.user),
+                    ).exclude(status__in=[PatientVisit.Status.COMPLETED, PatientVisit.Status.CANCELLED]),
+                    pk=visit_id,
+                )
+            elif not can_access_patient(request.user, patient)[0]:
+                return err("Select an assigned visit or a patient with an authorized care relationship.", 403)
             referring_doctor = request.user
         order = LabOrder.objects.create(
             patient=patient,
+            visit=visit,
             lab=lab,
             test=test,
             referring_doctor=referring_doctor,
@@ -997,11 +814,10 @@ class LabOrderListCreateView(APIView):
             priority=request.data.get("priority") or LabOrder.Priority.ROUTINE,
             specimen_type=str(request.data.get("specimen_type", "")).strip() or test.sample_type,
             prescription_id=request.data.get("prescription_id") or None,
-            # Priced tests are collected only after the patient pays (see
-            # payments.InitiatePaymentView); free tests proceed directly.
-            status=LabOrder.Status.AWAITING_PAYMENT if test.price > 0 else LabOrder.Status.BOOKED,
         )
-        _advance_visit(patient, "laboratory", request.user, f"Laboratory test {test.name} ordered")
+        if visit and visit.status in {PatientVisit.Status.IN_CONSULTATION, PatientVisit.Status.WAITING_CLINICIAN}:
+            visit.status = PatientVisit.Status.LABORATORY
+            visit.save(update_fields=["status", "updated_at"])
         try:
             from communication.services import notify
             notify(
@@ -1010,14 +826,6 @@ class LabOrderListCreateView(APIView):
                 f"{test.name} has been ordered at {lab.display_name}.",
                 kind="laboratory",
                 action_url="/patient/health-record",
-            )
-            notify(
-                lab,
-                "New laboratory order",
-                f"{test.name} for {patient.display_name} — {order.get_priority_display()} priority.",
-                kind="laboratory",
-                action_url="/lab/orders",
-                priority="high" if order.priority == LabOrder.Priority.URGENT else "normal",
             )
         except Exception:
             pass
@@ -1034,7 +842,7 @@ class LabOrderManageView(APIView):
         lab_account, denied = require_provider_account(request, User.Role.LAB)
         if denied:
             return denied
-        qs = LabOrder.objects.filter(lab=lab_account).select_related("test", "patient", "referring_doctor").order_by("-created_at")
+        qs = LabOrder.objects.filter(lab=lab_account).select_related("test", "patient", "referring_doctor", "visit").order_by("-created_at")
         return Response(LabOrderSerializer(qs, many=True, context={"request": request}).data)
 
 
@@ -1042,19 +850,42 @@ class LabOrderUpdateView(APIView):
     permission_classes = [IsRole]
     allowed_roles = [User.Role.LAB, User.Role.LAB_TECHNICIAN, User.Role.FACILITY_MANAGER]
 
+    @transaction.atomic
     def post(self, request, pk):
         lab_account, denied = require_provider_account(request, User.Role.LAB)
         if denied:
             return denied
-        order = LabOrder.objects.filter(pk=pk, lab=lab_account).first()
+        order = LabOrder.objects.select_for_update().filter(pk=pk, lab=lab_account).first()
         if order is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
+        if request.data.get("action") == "record_arrival":
+            if order.arrived_at is None:
+                if order.status not in {LabOrder.Status.BOOKED, LabOrder.Status.READY_FOR_COLLECTION}:
+                    return err("This order is not awaiting check-in.", 409)
+                from governance.services import audit
+                order.arrived_at = timezone.now()
+                order.save(update_fields=["arrived_at", "updated_at"])
+                audit(actor=request.user, patient=order.patient, resource=order, purpose="treatment",
+                      action="laboratory.arrival.recorded", request=request)
+            return Response(LabOrderSerializer(order, context={"request": request}).data)
+        previous_status = order.status
         changed = []
         new_status = request.data.get("status")
         if new_status:
             valid = {c for c, _ in LabOrder.Status.choices}
             if new_status not in valid:
                 return err("Invalid status.")
+            if new_status == LabOrder.Status.REJECTED:
+                if previous_status not in {LabOrder.Status.SAMPLE_COLLECTED, LabOrder.Status.SAMPLE_RECEIVED} or order.result_released:
+                    return err("Only collected or received specimens without a released result can be rejected.", 409)
+                if not str(request.data.get("rejection_reason") or "").strip():
+                    return err("Enter a specimen rejection reason.")
+            if previous_status == LabOrder.Status.REJECTED:
+                if new_status != LabOrder.Status.READY_FOR_COLLECTION:
+                    return err("Request recollection before updating a rejected order.", 409)
+                order.specimen_id = order.specimen_type = order.collection_notes = ""
+                order.arrived_at = order.collected_at = order.received_at = order.collected_by = None
+                changed.extend(["specimen_id", "specimen_type", "collection_notes", "collected_at", "received_at", "collected_by", "arrived_at"])
             order.status = new_status
             changed.append("status")
             if new_status == LabOrder.Status.SAMPLE_COLLECTED:
@@ -1073,18 +904,22 @@ class LabOrderUpdateView(APIView):
             "result_notes", "clinical_indication", "provisional_diagnosis", "priority",
         ]
         for field in editable:
+            if previous_status == LabOrder.Status.REJECTED and new_status == LabOrder.Status.READY_FOR_COLLECTION and field in {"specimen_id", "specimen_type", "collection_notes", "rejection_reason"}:
+                continue
             if field in request.data:
                 setattr(order, field, request.data.get(field) or "")
                 changed.append(field)
         if "result_file" in request.FILES:
-            result_file = request.FILES["result_file"]
-            validate_clinical_document_upload(result_file)
-            order.result_file = result_file
+            order.result_file = request.FILES["result_file"]
             changed.append("result_file")
         if changed:
             order.save(update_fields=list(dict.fromkeys(changed + ["updated_at"])))
-        if order.result_released:
-            _advance_visit(order.patient, "waiting_clinician", request.user, f"Laboratory result released for {order.test.name}")
+        if new_status == LabOrder.Status.REJECTED or previous_status == LabOrder.Status.REJECTED and new_status:
+            from governance.services import audit
+            audit(actor=request.user, patient=order.patient, resource=order, purpose="treatment",
+                  action="laboratory.specimen.rejected" if new_status == LabOrder.Status.REJECTED else "laboratory.specimen.recollection_requested",
+                  metadata={"order_id": order.pk}, request=request)
+        if order.result_released and previous_status != order.status:
             try:
                 from communication.services import notify
                 notify(
@@ -1096,21 +931,19 @@ class LabOrderUpdateView(APIView):
                     priority="high" if order.results.filter(interpretation="critical").exists() else "normal",
                 )
                 if order.referring_doctor_id:
-                    notify(
-                        order.referring_doctor,
-                        "Referred laboratory result available",
-                        f"{order.test.name} result for {order.patient.display_name} has been released.",
-                        kind="laboratory",
-                        action_url="/doctor/lab-referrals",
-                        priority="high" if order.results.filter(interpretation="critical").exists() else "normal",
-                    )
+                    notify(order.referring_doctor, "Laboratory report available",
+                           "A report is ready in the laboratory referrals worklist.",
+                           kind="laboratory", action_url="/doctor/lab-referrals")
             except Exception:
                 pass
         return Response(LabOrderSerializer(order, context={"request": request}).data)
 
 class LabResultListCreateView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = list({User.Role.PATIENT, User.Role.LAB, User.Role.ADMIN} | CLINICAL_ROLES)
+    allowed_roles = [
+        User.Role.PATIENT, User.Role.LAB, User.Role.LAB_TECHNICIAN,
+        User.Role.DOCTOR, User.Role.NURSE, User.Role.ADMIN,
+    ]
 
     def _order_for_user(self, request, pk):
         order = LabOrder.objects.filter(pk=pk).select_related(
@@ -1119,27 +952,31 @@ class LabResultListCreateView(APIView):
         if order is None:
             return None, err("Not found.", drf_status.HTTP_404_NOT_FOUND)
         allowed = (
-            request_role(request) == User.Role.ADMIN
+            request.user.role == User.Role.ADMIN
             or request.user == order.patient
             or provider_account_for(request.user, User.Role.LAB) == order.lab
             or request.user == order.referring_doctor
         )
-        if request_role(request) in (DOCTOR_ROLES | ALLIED_HEALTH_ROLES | {User.Role.ANAESTHETIST, User.Role.PARAMEDIC}) and not allowed:
+        if request.user.role == User.Role.DOCTOR and not allowed:
             from appointments.models import Appointment
 
-            allowed = Appointment.objects.filter(
-                doctor=request.user,
-                patient=order.patient,
-            ).exclude(status="cancelled").exists()
-        elif request_role(request) in NURSING_ROLES and not allowed:
+            from operations.access import organizations
+            allowed = bool(order.visit_id and order.visit.assigned_doctor_id == request.user.pk
+                           and organizations(request.user).filter(pk=order.visit.organization_id).exists())
+            if not allowed and not order.visit_id:
+                allowed = Appointment.objects.filter(
+                    doctor=request.user, patient=order.patient,
+                ).exclude(status="cancelled").exists()
+        elif request.user.role == User.Role.NURSE and not allowed:
             from workforce.models import PatientVisit
 
-            allowed = PatientVisit.objects.filter(
-                patient=order.patient,
-                assigned_nurse=request.user,
-            ).exclude(
+            from operations.access import organizations
+            visits = PatientVisit.objects.filter(patient=order.patient, assigned_nurse=request.user).exclude(
                 status__in=[PatientVisit.Status.COMPLETED, PatientVisit.Status.CANCELLED]
-            ).exists()
+            )
+            if order.visit_id:
+                visits = visits.filter(pk=order.visit_id, organization__in=organizations(request.user))
+            allowed = visits.exists()
         if not allowed:
             return None, err("Not allowed.", drf_status.HTTP_403_FORBIDDEN)
         return order, None
@@ -1148,26 +985,44 @@ class LabResultListCreateView(APIView):
         order, denied = self._order_for_user(request, pk)
         if denied:
             return denied
-        qs = order.results.all()
-        if request_role(request) == User.Role.PATIENT:
+        qs = order.results.select_related("replacement", "acknowledgement__acknowledged_by")
+        if request.user.role == User.Role.PATIENT:
             if not order.result_released:
                 return Response([])
             qs = qs.filter(status__in=[LabResult.Status.FINAL, LabResult.Status.AMENDED, LabResult.Status.CORRECTED])
         return Response(LabResultSerializer(qs, many=True).data)
 
+    @transaction.atomic
     def post(self, request, pk):
-        if request_role(request) not in {User.Role.LAB, User.Role.LAB_TECHNICIAN}:
+        if request.user.role not in {User.Role.LAB, User.Role.LAB_TECHNICIAN}:
             return err("Only authorized laboratory staff can enter results.", drf_status.HTTP_403_FORBIDDEN)
         lab_account, denied = require_provider_account(request, User.Role.LAB)
         if denied:
             return denied
-        order = LabOrder.objects.filter(pk=pk, lab=lab_account).first()
+        order = LabOrder.objects.select_for_update().filter(pk=pk, lab=lab_account).first()
         if order is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
+        if order.status == LabOrder.Status.REJECTED:
+            return err("The specimen must be recollected before entering results.", 409)
         serializer = LabResultSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         requested_status = serializer.validated_data.get("status", LabResult.Status.PRELIMINARY)
-        release = bool(request.data.get("release", False)) or requested_status in {
+        previous = serializer.validated_data.get("supersedes")
+        amendment = requested_status in {LabResult.Status.AMENDED, LabResult.Status.CORRECTED}
+        if amendment:
+            if not previous or previous.order_id != order.pk or not previous.released_at:
+                return err("Select a released result from this order to amend.")
+            if LabResult.objects.filter(supersedes=previous).exists():
+                return err("This result has already been replaced.", 409)
+            if not serializer.validated_data.get("amendment_reason", "").strip():
+                return err("Enter a reason for the amendment.")
+        elif previous:
+            return err("A replacement must be an amended or corrected result.")
+        elif order.results.filter(
+            code=serializer.validated_data.get("code", ""), name=serializer.validated_data["name"], supersedes__isnull=True,
+        ).exists():
+            return err("A result with that name and code already exists. Amend its current version.", 409)
+        release = str(request.data.get("release", "")).lower() in {"true", "1"} or requested_status in {
             LabResult.Status.FINAL, LabResult.Status.AMENDED, LabResult.Status.CORRECTED
         }
         now = timezone.now()
@@ -1180,16 +1035,23 @@ class LabResultListCreateView(APIView):
             released_at=now if release else None,
         )
         if release:
-            order.status = LabOrder.Status.COMPLETED
+            order.status = LabOrder.Status.AMENDED if amendment else LabOrder.Status.COMPLETED
             order.result_released = True
             order.released_at = now
-            order.save(update_fields=["status", "result_released", "released_at", "updated_at"])
+            fields = ["status", "result_released", "released_at", "updated_at"]
+            if not amendment and "result_file" in request.FILES:
+                order.result_file = request.FILES["result_file"]
+                fields.append("result_file")
+            if not amendment and "result_notes" in request.data:
+                order.result_notes = request.data["result_notes"]
+                fields.append("result_notes")
+            order.save(update_fields=fields)
         else:
             order.status = LabOrder.Status.AWAITING_VALIDATION
             order.save(update_fields=["status", "updated_at"])
         try:
             from communication.services import notify
-            body = "A laboratory result is ready. Please open HealthPilot to review it securely."
+            body = "A laboratory result is ready. Please open MyDoctor to review it securely."
             if result.interpretation == LabResult.Interpretation.CRITICAL:
                 body = "A critical laboratory result requires prompt clinical review. Contact your care team."
             if release:
@@ -1204,11 +1066,11 @@ class LabResultListCreateView(APIView):
                 if order.referring_doctor:
                     notify(
                         order.referring_doctor,
-                        "Referred laboratory result available",
+                        "Referred laboratory result amended" if amendment else "Referred laboratory result available",
                         f"{order.test.name} results for {order.patient.display_name} are ready.",
                         kind="laboratory",
                         priority="urgent" if result.interpretation == LabResult.Interpretation.CRITICAL else "normal",
-                        action_url="/doctor/clinical",
+                        action_url="/doctor/lab-referrals",
                     )
         except Exception:
             pass
@@ -1244,16 +1106,33 @@ class LabResultListCreateView(APIView):
 
 class CriticalResultAcknowledgeView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = list(DOCTOR_ROLES | NURSING_ROLES | {User.Role.ANAESTHETIST, User.Role.PARAMEDIC, User.Role.ADMIN})
+    allowed_roles = [User.Role.DOCTOR, User.Role.NURSE, User.Role.ADMIN]
 
     def post(self, request, pk):
-        result = LabResult.objects.filter(pk=pk, interpretation=LabResult.Interpretation.CRITICAL).select_related("order__patient").first()
+        result = LabResult.objects.filter(pk=pk, interpretation=LabResult.Interpretation.CRITICAL, released_at__isnull=False, replacement__isnull=True).select_related("order__patient").first()
         if result is None:
             return err("Critical result not found.", drf_status.HTTP_404_NOT_FOUND)
-        if request_role(request) in (DOCTOR_ROLES | {User.Role.ANAESTHETIST, User.Role.PARAMEDIC}):
+        from operations.access import organizations, require_role
+        require_role(request.user, {"doctor", "nurse"})
+        order = result.order
+        if request.user.role == User.Role.DOCTOR:
             from appointments.models import Appointment
-            if not Appointment.objects.filter(doctor=request.user, patient=result.order.patient).exists():
+            assigned = bool(order.visit_id and order.visit.assigned_doctor_id == request.user.pk
+                            and organizations(request.user).filter(pk=order.visit.organization_id).exists())
+            legacy = not order.visit_id and Appointment.objects.filter(
+                doctor=request.user, patient=order.patient,
+            ).exclude(status="cancelled").exists()
+            if request.user.pk != order.referring_doctor_id and not assigned and not legacy:
                 return err("No care relationship.", drf_status.HTTP_403_FORBIDDEN)
+        if request.user.role == User.Role.NURSE:
+            from workforce.models import PatientVisit
+            visits = PatientVisit.objects.filter(patient=order.patient, assigned_nurse=request.user).exclude(
+                status__in=[PatientVisit.Status.COMPLETED, PatientVisit.Status.CANCELLED],
+            )
+            if order.visit_id:
+                visits = visits.filter(pk=order.visit_id, organization__in=organizations(request.user))
+            if not visits.exists():
+                return err("An active assigned visit is required.", drf_status.HTTP_403_FORBIDDEN)
         ack, created = CriticalResultAcknowledgement.objects.get_or_create(
             result=result,
             defaults={"acknowledged_by": request.user, "notes": request.data.get("notes", "")},
@@ -1376,19 +1255,6 @@ class HospitalBookingListCreateView(APIView):
         booking = HospitalBooking.objects.create(
             patient=request.user, hospital=hospital, service=service, date=date
         )
-        try:
-            from communication.services import notify
-
-            service_label = f" for {service.name}" if service else ""
-            notify(
-                hospital,
-                "New service booking",
-                f"{request.user.display_name} booked{service_label} on {date}.",
-                kind="hospital",
-                action_url="/hospital/bookings",
-            )
-        except Exception:
-            pass
         return Response(
             HospitalBookingSerializer(booking).data, status=drf_status.HTTP_201_CREATED
         )
@@ -1482,6 +1348,9 @@ class BedDetailView(APIView):
         bed = self._get_own(request, pk)
         if bed is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
+        from operations.models import Admission
+        if Admission.objects.filter(bed=bed).exists():
+            return err("Beds linked to admission history cannot be deleted.", 409)
         bed.delete()
         return Response(status=drf_status.HTTP_204_NO_CONTENT)
 
@@ -1490,13 +1359,17 @@ class BedToggleView(APIView):
     permission_classes = [IsRole]
     allowed_roles = [User.Role.HOSPITAL, User.Role.RECEPTIONIST, User.Role.FACILITY_MANAGER]
 
+    @transaction.atomic
     def post(self, request, pk):
         hospital_account, denied = require_provider_account(request, User.Role.HOSPITAL)
         if denied:
             return denied
-        bed = Bed.objects.filter(pk=pk, hospital=hospital_account).first()
+        bed = Bed.objects.select_for_update().filter(pk=pk, hospital=hospital_account).first()
         if bed is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
+        from operations.models import Admission
+        if Admission.objects.filter(bed=bed, status="admitted").exists():
+            return err("Use the admission transfer or discharge workflow for this occupied bed.", 409)
         bed.is_occupied = not bed.is_occupied
         bed.save(update_fields=["is_occupied"])
         return Response(BedSerializer(bed).data)
@@ -1505,164 +1378,8 @@ class BedToggleView(APIView):
 # ---------------------------------------------------------------------------
 # INSURANCE
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# INSURANCE
-# ---------------------------------------------------------------------------
-INSURANCE_REVIEW_ROLES = [
-    User.Role.INSURANCE,
-    User.Role.INSURANCE_OFFICER,
-    User.Role.CLAIMS_REVIEWER,
-    User.Role.FACILITY_MANAGER,
-    User.Role.ADMIN,
-]
-INSURANCE_REQUEST_ROLES = [
-    User.Role.PATIENT,
-    User.Role.RECEPTIONIST,
-    User.Role.CASHIER,
-    User.Role.FACILITY_MANAGER,
-    User.Role.HOSPITAL,
-    User.Role.DOCTOR,
-    User.Role.CLINICAL_OFFICER,
-    User.Role.MEDICAL_DIRECTOR,
-    User.Role.INSURANCE,
-    User.Role.INSURANCE_OFFICER,
-    User.Role.CLAIMS_REVIEWER,
-    User.Role.ADMIN,
-]
-
-
-def _insurance_account(request):
-    if request_role(request) == User.Role.ADMIN:
-        provider_id = request.query_params.get("provider") or request.data.get("provider_id")
-        return User.objects.filter(pk=provider_id, role=User.Role.INSURANCE).first()
-    return provider_account_for(request.user, User.Role.INSURANCE)
-
-
-def _notify_insurance(user, title, body, *, action_url="/patient/insurance", metadata=None):
-    try:
-        from communication.services import notify
-
-        notify(
-            user,
-            title,
-            body,
-            kind="insurance",
-            priority="high",
-            action_url=action_url,
-            channels=["in_app", "email"],
-            metadata=metadata or {},
-        )
-    except Exception:
-        pass
-
-
-def _audit_insurance(request, action, resource, patient=None, metadata=None):
-    try:
-        from governance.services import audit
-
-        audit(
-            actor=request.user,
-            patient=patient,
-            action=action,
-            resource=resource,
-            purpose="payment" if "claim" in action or "remittance" in action else "operations",
-            metadata=metadata or {},
-            request=request,
-        )
-    except Exception:
-        pass
-
-
-def _policy_rule(policy, service_code="", service_category=""):
-    rules = policy.benefit_rules.filter(active=True)
-    if service_code:
-        exact = rules.filter(service_code__iexact=service_code).first()
-        if exact:
-            return exact
-    if service_category:
-        category = rules.filter(service_category__iexact=service_category).first()
-        if category:
-            return category
-    return None
-
-
-def _evaluate_coverage(coverage, *, service_code="", service_category="", estimated_amount=0):
-    """Apply policy and benefit limits to an eligibility request.
-
-    The calculation is deterministic and its complete snapshot is persisted on
-    every eligibility check. Contract-specific adjudication can therefore be
-    layered on later without losing the decision used at the point of care.
-    """
-    today = timezone.localdate()
-    policy = coverage.policy
-    amount = max(int(estimated_amount or 0), 0)
-    rule = _policy_rule(policy, service_code, service_category)
-    if not coverage.active or not policy.active:
-        return {"result": InsuranceEligibilityCheck.Result.INACTIVE, "reason": "Coverage or policy is inactive."}
-    if coverage.expires_on and coverage.expires_on < today:
-        return {"result": InsuranceEligibilityCheck.Result.EXPIRED, "reason": "Coverage has expired."}
-    waiting_days = max(policy.waiting_period_days, getattr(rule, "waiting_period_days", 0) or 0)
-    waiting_until = coverage.effective_from + timedelta(days=waiting_days)
-    if today < waiting_until:
-        return {
-            "result": InsuranceEligibilityCheck.Result.WAITING_PERIOD,
-            "reason": f"Waiting period ends on {waiting_until}.",
-            "waiting_until": str(waiting_until),
-        }
-    if rule and rule.excluded:
-        return {"result": InsuranceEligibilityCheck.Result.INACTIVE, "reason": "The requested service is excluded by this policy."}
-
-    percent = rule.coverage_percent if rule and rule.coverage_percent is not None else policy.coverage_percent
-    percent = min(max(int(percent or 0), 0), 100)
-    deductible = int(policy.deductible or 0)
-    eligible_base = max(amount - deductible, 0)
-    covered = int(eligible_base * percent / 100)
-    per_visit_limit = int(getattr(rule, "per_visit_limit", 0) or 0)
-    if per_visit_limit:
-        covered = min(covered, per_visit_limit)
-
-    annual_limit = int(getattr(rule, "annual_limit", 0) or policy.annual_limit or 0)
-    used = 0
-    if annual_limit:
-        year_start = today.replace(month=1, day=1)
-        used = int(
-            InsuranceClaim.objects.filter(
-                coverage=coverage,
-                status__in=[
-                    InsuranceClaim.Status.APPROVED,
-                    InsuranceClaim.Status.PARTIALLY_APPROVED,
-                    InsuranceClaim.Status.PAID,
-                ],
-                reviewed_at__date__gte=year_start,
-            ).aggregate(total=Sum("approved_amount"))["total"]
-            or 0
-        )
-        covered = min(covered, max(annual_limit - used, 0))
-
-    copay_percent = rule.copay_percent if rule and rule.copay_percent is not None else policy.copay_percent
-    copay_fixed = int(getattr(rule, "copay_fixed", 0) or policy.copay_fixed or 0)
-    copay = int(amount * int(copay_percent or 0) / 100) + copay_fixed
-    covered = max(min(covered - copay, amount), 0)
-    requires_preauthorization = bool(
-        policy.requires_preauthorization or (rule and rule.requires_preauthorization)
-    )
-    return {
-        "result": InsuranceEligibilityCheck.Result.ELIGIBLE,
-        "reason": "Coverage is active for the requested service.",
-        "coverage_percent": percent,
-        "covered_amount": covered,
-        "patient_responsibility": max(amount - covered, 0),
-        "requires_preauthorization": requires_preauthorization,
-        "annual_limit": annual_limit,
-        "annual_used": used,
-        "deductible": deductible,
-        "copay": copay,
-        "rule_id": getattr(rule, "id", None),
-    }
-
-
 class PolicyListCreateView(APIView):
-    allowed_roles = INSURANCE_REVIEW_ROLES
+    allowed_roles = [User.Role.INSURANCE, User.Role.INSURANCE_OFFICER, User.Role.FACILITY_MANAGER]
 
     def get_permissions(self):
         if self.request.method == "GET":
@@ -1670,50 +1387,50 @@ class PolicyListCreateView(APIView):
         return [IsRole()]
 
     def get(self, request):
-        qs = InsurancePolicy.objects.prefetch_related("benefit_rules").order_by("name")
+        qs = InsurancePolicy.objects.all().order_by("id")
         provider = request.query_params.get("provider")
         search = request.query_params.get("search")
-        active = request.query_params.get("active")
-        account = provider_account_for(request.user, User.Role.INSURANCE) if request.user.is_authenticated else None
-        if account is not None and not provider:
-            qs = qs.filter(provider=account)
+        if (
+            request.user.is_authenticated
+            and provider_account_for(request.user, User.Role.INSURANCE) is not None
+            and not provider
+        ):
+            qs = qs.filter(provider=provider_account_for(request.user, User.Role.INSURANCE))
         if provider:
             qs = qs.filter(provider_id=provider)
         if search:
-            qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
-        if active in {"true", "false"}:
-            qs = qs.filter(active=active == "true")
+            qs = qs.filter(name__icontains=search)
         return Response(InsurancePolicySerializer(qs, many=True).data)
 
     def post(self, request):
         ser = InsurancePolicySerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        insurance_account = _insurance_account(request)
-        if insurance_account is None:
-            return err("Your account is not assigned to this insurer workspace.", drf_status.HTTP_403_FORBIDDEN)
+        if not ser.is_valid():
+            return err(str(ser.errors))
+        insurance_account, denied = require_provider_account(request, User.Role.INSURANCE)
+        if denied:
+            return denied
         policy = ser.save(provider=insurance_account)
-        _audit_insurance(request, "insurance.policy.created", policy)
         return Response(InsurancePolicySerializer(policy).data, status=drf_status.HTTP_201_CREATED)
 
 
 class PolicyDetailView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = INSURANCE_REVIEW_ROLES
+    allowed_roles = [User.Role.INSURANCE, User.Role.INSURANCE_OFFICER, User.Role.FACILITY_MANAGER]
 
     def _get_own(self, request, pk):
-        insurance_account = _insurance_account(request)
+        insurance_account = provider_account_for(request.user, User.Role.INSURANCE)
         if insurance_account is None:
             return None
-        return InsurancePolicy.objects.filter(pk=pk, provider=insurance_account).prefetch_related("benefit_rules").first()
+        return InsurancePolicy.objects.filter(pk=pk, provider=insurance_account).first()
 
     def put(self, request, pk):
         policy = self._get_own(request, pk)
         if policy is None:
-            return err("Policy not found.", drf_status.HTTP_404_NOT_FOUND)
+            return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
         ser = InsurancePolicySerializer(policy, data=request.data, partial=True)
-        ser.is_valid(raise_exception=True)
+        if not ser.is_valid():
+            return err(str(ser.errors))
         ser.save()
-        _audit_insurance(request, "insurance.policy.updated", policy)
         return Response(ser.data)
 
     patch = put
@@ -1721,612 +1438,137 @@ class PolicyDetailView(APIView):
     def delete(self, request, pk):
         policy = self._get_own(request, pk)
         if policy is None:
-            return err("Policy not found.", drf_status.HTTP_404_NOT_FOUND)
-        policy.active = False
-        policy.save(update_fields=["active", "updated_at"])
-        _audit_insurance(request, "insurance.policy.deactivated", policy)
+            return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
+        policy.delete()
         return Response(status=drf_status.HTTP_204_NO_CONTENT)
 
 
-class BenefitRuleListCreateView(APIView):
-    permission_classes = [IsRole]
-    allowed_roles = INSURANCE_REVIEW_ROLES
-
-    def _policy(self, request, policy_id):
-        account = _insurance_account(request)
-        return InsurancePolicy.objects.filter(pk=policy_id, provider=account).first() if account else None
-
-    def get(self, request, policy_id):
-        policy = self._policy(request, policy_id)
-        if not policy:
-            return err("Policy not found.", drf_status.HTTP_404_NOT_FOUND)
-        return Response(InsuranceBenefitRuleSerializer(policy.benefit_rules.all(), many=True).data)
-
-    def post(self, request, policy_id):
-        policy = self._policy(request, policy_id)
-        if not policy:
-            return err("Policy not found.", drf_status.HTTP_404_NOT_FOUND)
-        serializer = InsuranceBenefitRuleSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        rule = serializer.save(policy=policy)
-        _audit_insurance(request, "insurance.benefit_rule.created", rule)
-        return Response(InsuranceBenefitRuleSerializer(rule).data, status=201)
-
-
-class BenefitRuleDetailView(APIView):
-    permission_classes = [IsRole]
-    allowed_roles = INSURANCE_REVIEW_ROLES
-
-    def _rule(self, request, pk):
-        account = _insurance_account(request)
-        return InsuranceBenefitRule.objects.filter(pk=pk, policy__provider=account).first() if account else None
-
-    def patch(self, request, pk):
-        rule = self._rule(request, pk)
-        if not rule:
-            return err("Benefit rule not found.", 404)
-        serializer = InsuranceBenefitRuleSerializer(rule, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        _audit_insurance(request, "insurance.benefit_rule.updated", rule)
-        return Response(serializer.data)
-
-    put = patch
-
-    def delete(self, request, pk):
-        rule = self._rule(request, pk)
-        if not rule:
-            return err("Benefit rule not found.", 404)
-        rule.active = False
-        rule.save(update_fields=["active", "updated_at"])
-        return Response(status=204)
-
-
 class CoverageVerifyView(APIView):
-    permission_classes = [IsRole]
-    allowed_roles = INSURANCE_REQUEST_ROLES
+    permission_classes = [AllowAny]
 
-    @transaction.atomic
     def post(self, request):
-        member_id = str(request.data.get("member_id", "")).strip()
+        member_id = request.data.get("member_id")
         provider_id = request.data.get("provider_id")
         if not member_id or not provider_id:
             return err("member_id and provider_id are required.")
-        provider = User.objects.filter(
-            pk=provider_id, role=User.Role.INSURANCE, is_active=True
-        ).first()
-        if provider is None:
-            return err("Active insurance provider not found.", drf_status.HTTP_404_NOT_FOUND)
-        try:
-            estimated_amount = max(int(request.data.get("estimated_amount") or 0), 0)
-        except (TypeError, ValueError):
-            return err("estimated_amount must be a whole number greater than or equal to zero.")
         coverage = (
-            PatientCoverage.objects.filter(member_id__iexact=member_id, provider=provider)
-            .select_related("policy", "patient", "provider")
-            .order_by("-active", "-id")
+            PatientCoverage.objects.filter(member_id=member_id, provider_id=provider_id, active=True)
+            .select_related("policy")
             .first()
         )
         if coverage is None:
-            result = InsuranceEligibilityCheck.objects.create(
-                provider=provider,
-                member_id=member_id,
-                service_code=str(request.data.get("service_code", "")),
-                service_category=str(request.data.get("service_category", "")),
-                estimated_amount=estimated_amount,
-                result=InsuranceEligibilityCheck.Result.NOT_FOUND,
-                reason="No matching member coverage was found.",
-                requested_by=request.user,
-            )
-            return Response({"valid": False, **InsuranceEligibilityCheckSerializer(result).data})
-
-        if request_role(request) == User.Role.PATIENT and coverage.patient_id != request.user.id:
-            return err("You may only verify your own coverage.", drf_status.HTTP_403_FORBIDDEN)
-        decision = _evaluate_coverage(
-            coverage,
-            service_code=str(request.data.get("service_code", "")),
-            service_category=str(request.data.get("service_category", "")),
-            estimated_amount=estimated_amount,
-        )
-        check = InsuranceEligibilityCheck.objects.create(
-            coverage=coverage,
-            patient=coverage.patient,
-            provider=coverage.provider,
-            member_id=coverage.member_id,
-            service_code=str(request.data.get("service_code", "")),
-            service_category=str(request.data.get("service_category", "")),
-            estimated_amount=estimated_amount,
-            result=decision["result"],
-            coverage_percent=decision.get("coverage_percent", 0),
-            covered_amount=decision.get("covered_amount", 0),
-            patient_responsibility=decision.get("patient_responsibility", 0),
-            requires_preauthorization=decision.get("requires_preauthorization", False),
-            reason=decision.get("reason", ""),
-            response_snapshot=decision,
-            requested_by=request.user,
-        )
-        coverage.last_eligibility_check_at = timezone.now()
-        if decision["result"] == InsuranceEligibilityCheck.Result.ELIGIBLE:
-            coverage.verified_at = timezone.now()
-        coverage.save(update_fields=["last_eligibility_check_at", "verified_at"])
-        _audit_insurance(request, "insurance.eligibility.checked", check, patient=coverage.patient)
-        payload = InsuranceEligibilityCheckSerializer(check).data
-        payload.update(
+            return Response({"valid": False})
+        return Response(
             {
-                "valid": decision["result"] == InsuranceEligibilityCheck.Result.ELIGIBLE,
+                "valid": True,
                 "policy": coverage.policy.name,
-                "coverage_percent": decision.get("coverage_percent", 0),
+                "coverage_percent": coverage.policy.coverage_percent,
             }
         )
-        return Response(payload)
-
-
-class EligibilityHistoryView(APIView):
-    permission_classes = [IsRole]
-    allowed_roles = INSURANCE_REQUEST_ROLES
-
-    def get(self, request):
-        qs = InsuranceEligibilityCheck.objects.select_related("coverage__policy", "patient", "provider")
-        if request_role(request) == User.Role.PATIENT:
-            qs = qs.filter(patient=request.user)
-        elif request_role(request) != User.Role.ADMIN:
-            account = provider_account_for(request.user, User.Role.INSURANCE)
-            if account:
-                qs = qs.filter(provider=account)
-            else:
-                organization = organization_for_user(request.user)
-                if organization:
-                    qs = qs.filter(requested_by__staff_memberships__organization=organization).distinct()
-                else:
-                    qs = qs.filter(requested_by=request.user)
-        return Response(InsuranceEligibilityCheckSerializer(qs[:250], many=True).data)
 
 
 class CoverageListCreateView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = [User.Role.PATIENT, *INSURANCE_REVIEW_ROLES]
+    allowed_roles = [User.Role.PATIENT]
 
     def get(self, request):
-        if request_role(request) == User.Role.PATIENT:
-            qs = PatientCoverage.objects.filter(patient=request.user)
-        else:
-            account = _insurance_account(request)
-            qs = PatientCoverage.objects.filter(provider=account) if account else PatientCoverage.objects.none()
-            patient_id = request.query_params.get("patient")
-            if patient_id:
-                qs = qs.filter(patient_id=patient_id)
-        qs = qs.select_related("policy", "provider", "patient").order_by("-active", "-id")
+        qs = (
+            PatientCoverage.objects.filter(patient=request.user)
+            .select_related("policy", "provider")
+            .order_by("-id")
+        )
         return Response(PatientCoverageSerializer(qs, many=True).data)
 
-    @transaction.atomic
     def post(self, request):
         provider_id = request.data.get("provider_id")
         policy_id = request.data.get("policy_id")
-        member_id = str(request.data.get("member_id", "")).strip()
+        member_id = request.data.get("member_id")
         if not member_id:
             return err("member_id is required.")
-        provider = User.objects.filter(pk=provider_id, role=User.Role.INSURANCE, is_active=True).first()
+        provider = User.objects.filter(pk=provider_id, role=User.Role.INSURANCE).first()
         if provider is None:
             return err("Provider not found.", drf_status.HTTP_404_NOT_FOUND)
-        if request_role(request) not in {User.Role.PATIENT, User.Role.ADMIN} and provider_account_for(request.user, User.Role.INSURANCE) != provider:
-            return err("You cannot enrol members for this insurer.", 403)
-        patient = request.user if request_role(request) == User.Role.PATIENT else User.objects.filter(
-            pk=request.data.get("patient_id"), role=User.Role.PATIENT
-        ).first()
-        if patient is None:
-            return err("Patient not found.", 404)
-        policy = InsurancePolicy.objects.filter(pk=policy_id, provider=provider, active=True).first()
+        policy = InsurancePolicy.objects.filter(pk=policy_id, provider=provider).first()
         if policy is None:
-            return err("Active policy not found.", drf_status.HTTP_404_NOT_FOUND)
-        if PatientCoverage.objects.filter(provider=provider, member_id__iexact=member_id, active=True).exclude(patient=patient).exists():
-            return err("This member ID is already assigned to another active patient.", 409)
-        coverage, _ = PatientCoverage.objects.update_or_create(
-            patient=patient,
-            provider=provider,
-            policy=policy,
-            defaults={
-                "member_id": member_id,
-                "active": True,
-                "effective_from": request.data.get("effective_from") or timezone.localdate(),
-                "expires_on": request.data.get("expires_on") or None,
-                "dependant_code": str(request.data.get("dependant_code", "")),
-                "employer_or_group": str(request.data.get("employer_or_group", "")),
-            },
+            return err("Policy not found.", drf_status.HTTP_404_NOT_FOUND)
+        coverage = PatientCoverage.objects.create(
+            patient=request.user, provider=provider, policy=policy, member_id=member_id
         )
-        _audit_insurance(request, "insurance.coverage.enrolled", coverage, patient=patient)
-        return Response(PatientCoverageSerializer(coverage).data, status=drf_status.HTTP_201_CREATED)
-
-
-class PreauthorizationListCreateView(APIView):
-    permission_classes = [IsRole]
-    allowed_roles = INSURANCE_REQUEST_ROLES
-
-    def get(self, request):
-        qs = InsurancePreauthorization.objects.select_related(
-            "patient", "provider", "policy", "coverage", "reviewed_by"
+        return Response(
+            PatientCoverageSerializer(coverage).data, status=drf_status.HTTP_201_CREATED
         )
-        if request_role(request) == User.Role.PATIENT:
-            qs = qs.filter(patient=request.user)
-        elif request_role(request) == User.Role.ADMIN:
-            provider = request.query_params.get("provider")
-            if provider:
-                qs = qs.filter(provider_id=provider)
-        else:
-            account = provider_account_for(request.user, User.Role.INSURANCE)
-            if account:
-                qs = qs.filter(provider=account)
-            else:
-                qs = qs.filter(Q(requesting_facility=request.user) | Q(patient_id=request.query_params.get("patient")))
-        status_value = request.query_params.get("status")
-        if status_value:
-            qs = qs.filter(status=status_value)
-        return Response(InsurancePreauthorizationSerializer(qs[:250], many=True).data)
-
-    @transaction.atomic
-    def post(self, request):
-        coverage = PatientCoverage.objects.select_related("patient", "provider", "policy").filter(
-            pk=request.data.get("coverage_id")
-        ).first()
-        if coverage is None:
-            return err("coverage_id is required and must identify an enrolled member.", 404)
-        if request_role(request) == User.Role.PATIENT and coverage.patient_id != request.user.id:
-            return err("You may request authorization only for your own coverage.", 403)
-        if not coverage.is_current:
-            return err("Coverage is not active.", 409)
-        service_name = str(request.data.get("service_name", "")).strip()
-        if not service_name:
-            return err("service_name is required.")
-        serializer = InsurancePreauthorizationSerializer(
-            data={
-                key: request.data[key]
-                for key in [
-                    "service_code", "service_name", "clinical_indication", "diagnosis_code",
-                    "requested_amount",
-                ]
-                if key in request.data
-            }
-        )
-        serializer.is_valid(raise_exception=True)
-        preauthorization = serializer.save(
-            patient=coverage.patient,
-            provider=coverage.provider,
-            policy=coverage.policy,
-            coverage=coverage,
-            requesting_facility=None if request_role(request) == User.Role.PATIENT else request.user,
-            status=InsurancePreauthorization.Status.SUBMITTED,
-        )
-        _audit_insurance(request, "insurance.preauthorization.submitted", preauthorization, patient=coverage.patient)
-        _notify_insurance(
-            coverage.provider,
-            "Preauthorization submitted",
-            f"{coverage.patient.display_name} requested authorization for {service_name}.",
-            action_url="/insurance/preauthorizations",
-            metadata={"preauthorization_id": preauthorization.id},
-        )
-        return Response(InsurancePreauthorizationSerializer(preauthorization).data, status=201)
-
-
-class PreauthorizationDecisionView(APIView):
-    permission_classes = [IsRole]
-    allowed_roles = INSURANCE_REVIEW_ROLES
-
-    @transaction.atomic
-    def post(self, request, pk):
-        account = _insurance_account(request)
-        preauthorization = InsurancePreauthorization.objects.select_for_update().filter(pk=pk, provider=account).first()
-        if not preauthorization:
-            return err("Preauthorization not found.", 404)
-        action = str(request.data.get("action", "")).lower()
-        reason = str(request.data.get("reason", "")).strip()
-        status_map = {
-            "start_review": InsurancePreauthorization.Status.IN_REVIEW,
-            "query": InsurancePreauthorization.Status.QUERY,
-            "approve": InsurancePreauthorization.Status.APPROVED,
-            "partial": InsurancePreauthorization.Status.PARTIALLY_APPROVED,
-            "reject": InsurancePreauthorization.Status.REJECTED,
-            "cancel": InsurancePreauthorization.Status.CANCELLED,
-        }
-        if action not in status_map:
-            return err("action must be start_review, query, approve, partial, reject or cancel.")
-        if action in {"query", "partial", "reject", "cancel"} and not reason:
-            return err("A decision reason is required for this action.")
-        approved_amount = int(request.data.get("approved_amount") or 0)
-        if action == "approve" and not approved_amount:
-            approved_amount = preauthorization.requested_amount
-        if approved_amount > preauthorization.requested_amount:
-            return err("approved_amount cannot exceed requested_amount.")
-        preauthorization.status = status_map[action]
-        preauthorization.approved_amount = approved_amount if action in {"approve", "partial"} else 0
-        preauthorization.decision_reason = reason
-        preauthorization.reviewed_by = request.user
-        preauthorization.reviewed_at = timezone.now()
-        if action in {"approve", "partial"}:
-            preauthorization.valid_until = request.data.get("valid_until") or (timezone.localdate() + timedelta(days=30))
-        preauthorization.save()
-        _audit_insurance(
-            request,
-            f"insurance.preauthorization.{action}",
-            preauthorization,
-            patient=preauthorization.patient,
-            metadata={"reason": reason, "approved_amount": approved_amount},
-        )
-        _notify_insurance(
-            preauthorization.patient,
-            f"Preauthorization {preauthorization.get_status_display().lower()}",
-            f"Your request for {preauthorization.service_name} is {preauthorization.get_status_display().lower()}.",
-            metadata={"preauthorization_id": preauthorization.id},
-        )
-        return Response(InsurancePreauthorizationSerializer(preauthorization).data)
 
 
 class ClaimListCreateView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = INSURANCE_REQUEST_ROLES
+    allowed_roles = [User.Role.PATIENT]
 
     def get(self, request):
-        qs = InsuranceClaim.objects.select_related(
-            "policy", "provider", "patient", "coverage", "preauthorization", "reviewed_by"
-        ).prefetch_related("items", "remittances")
-        if request_role(request) == User.Role.PATIENT:
-            qs = qs.filter(patient=request.user)
-        elif request_role(request) == User.Role.ADMIN:
-            patient_id = request.query_params.get("patient")
-            provider_id = request.query_params.get("provider")
-            if patient_id:
-                qs = qs.filter(patient_id=patient_id)
-            if provider_id:
-                qs = qs.filter(provider_id=provider_id)
-        else:
-            account = provider_account_for(request.user, User.Role.INSURANCE)
-            if account:
-                qs = qs.filter(provider=account)
-            else:
-                qs = qs.filter(requested_by=request.user)
-        return Response(InsuranceClaimSerializer(qs[:250], many=True).data)
-
-    @transaction.atomic
-    def post(self, request):
-        coverage = PatientCoverage.objects.select_related("patient", "provider", "policy").filter(
-            pk=request.data.get("coverage_id")
-        ).first()
-        if coverage is None:
-            provider_id = request.data.get("provider_id")
-            policy_id = request.data.get("policy_id")
-            patient = request.user if request_role(request) == User.Role.PATIENT else User.objects.filter(
-                pk=request.data.get("patient_id"), role=User.Role.PATIENT
-            ).first()
-            coverage = PatientCoverage.objects.select_related("patient", "provider", "policy").filter(
-                patient=patient, provider_id=provider_id, policy_id=policy_id, active=True
-            ).first()
-        if coverage is None:
-            return err("An active coverage_id is required.", 404)
-        if request_role(request) == User.Role.PATIENT and coverage.patient_id != request.user.id:
-            return err("You may submit only your own claim.", 403)
-        if not coverage.is_current:
-            return err("Coverage is not active.", 409)
-
-        invoice = None
-        invoice_id = request.data.get("invoice_id")
-        if invoice_id not in (None, ""):
-            from payments.models import Invoice
-
-            invoice = Invoice.objects.prefetch_related("items").filter(pk=invoice_id, patient=coverage.patient).first()
-            if invoice is None:
-                return err("Invoice was not found for this patient.", 404)
-        amount = int(request.data.get("amount") or (invoice.amount if invoice else 0))
-        if amount <= 0:
-            return err("Claim amount must be greater than zero.")
-
-        preauthorization = None
-        if request.data.get("preauthorization_id"):
-            preauthorization = InsurancePreauthorization.objects.filter(
-                pk=request.data["preauthorization_id"],
-                coverage=coverage,
-                status__in=[
-                    InsurancePreauthorization.Status.APPROVED,
-                    InsurancePreauthorization.Status.PARTIALLY_APPROVED,
-                ],
-            ).first()
-            if preauthorization is None:
-                return err("The selected preauthorization is not approved for this member.", 409)
-
-        claim = InsuranceClaim.objects.create(
-            patient=coverage.patient,
-            provider=coverage.provider,
-            policy=coverage.policy,
-            coverage=coverage,
-            preauthorization=preauthorization,
-            invoice_id=invoice.id if invoice else None,
-            amount=amount,
-            diagnosis_code=str(request.data.get("diagnosis_code", "")),
-            clinical_summary=str(request.data.get("clinical_summary", "")),
-            requested_by=request.user,
-            status=InsuranceClaim.Status.SUBMITTED,
+        qs = (
+            InsuranceClaim.objects.filter(patient=request.user)
+            .select_related("policy", "provider")
+            .order_by("-created_at")
         )
-        payload_items = request.data.get("items") or []
-        if invoice:
-            payload_items = [
-                {
-                    "invoice_item_id": item.id,
-                    "service_code": item.code,
-                    "description": item.description,
-                    "quantity": max(int(item.quantity), 1),
-                    "unit_price": item.unit_price,
-                    "requested_amount": item.line_total,
-                }
-                for item in invoice.items.all()
-            ]
-        if not payload_items:
-            payload_items = [{"description": "Healthcare services", "requested_amount": amount, "unit_price": amount, "quantity": 1}]
-        for row in payload_items:
-            InsuranceClaimItem.objects.create(
-                claim=claim,
-                invoice_item_id=row.get("invoice_item_id"),
-                service_code=str(row.get("service_code", "")),
-                description=str(row.get("description") or "Healthcare service"),
-                quantity=max(int(row.get("quantity") or 1), 1),
-                unit_price=max(int(row.get("unit_price") or row.get("requested_amount") or 0), 0),
-                requested_amount=max(int(row.get("requested_amount") or 0), 0),
-            )
-        _audit_insurance(request, "insurance.claim.submitted", claim, patient=coverage.patient)
-        _notify_insurance(
-            coverage.provider,
-            "New claim submitted",
-            f"Claim {claim.claim_number} for {coverage.patient.display_name} requires review.",
-            action_url="/insurance/claims",
-            metadata={"claim_id": claim.id},
+        return Response(InsuranceClaimSerializer(qs, many=True).data)
+
+    def post(self, request):
+        provider_id = request.data.get("provider_id")
+        policy_id = request.data.get("policy_id")
+        invoice_id = request.data.get("invoice_id")
+        amount = request.data.get("amount")
+        try:
+            amount = int(amount)
+        except (TypeError, ValueError):
+            return err("amount is required and must be an integer.")
+        provider = User.objects.filter(pk=provider_id, role=User.Role.INSURANCE).first()
+        if provider is None:
+            return err("Provider not found.", drf_status.HTTP_404_NOT_FOUND)
+        policy = InsurancePolicy.objects.filter(pk=policy_id, provider=provider).first()
+        if policy is None:
+            return err("Policy not found.", drf_status.HTTP_404_NOT_FOUND)
+        claim = InsuranceClaim.objects.create(
+            patient=request.user,
+            provider=provider,
+            policy=policy,
+            invoice_id=invoice_id if invoice_id not in ("", None) else None,
+            amount=amount,
         )
         return Response(InsuranceClaimSerializer(claim).data, status=drf_status.HTTP_201_CREATED)
 
 
 class ClaimManageView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = INSURANCE_REVIEW_ROLES
+    allowed_roles = [User.Role.INSURANCE, User.Role.INSURANCE_OFFICER, User.Role.FACILITY_MANAGER]
 
     def get(self, request):
-        account = _insurance_account(request)
-        qs = InsuranceClaim.objects.filter(provider=account) if account else InsuranceClaim.objects.none()
-        status_value = request.query_params.get("status")
-        search = request.query_params.get("search")
-        if status_value:
-            qs = qs.filter(status=status_value)
-        if search:
-            qs = qs.filter(
-                Q(claim_number__icontains=search)
-                | Q(patient__first_name__icontains=search)
-                | Q(patient__last_name__icontains=search)
-                | Q(patient__email__icontains=search)
-            )
-        qs = qs.select_related("policy", "patient", "reviewed_by").prefetch_related("items", "remittances")
-        return Response(InsuranceClaimSerializer(qs[:500], many=True).data)
+        qs = (
+            InsuranceClaim.objects.filter(provider=provider_account_for(request.user, User.Role.INSURANCE))
+            .select_related("policy", "patient")
+            .order_by("-created_at")
+        )
+        return Response(InsuranceClaimSerializer(qs, many=True).data)
 
 
 class ClaimDecideView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = INSURANCE_REVIEW_ROLES
+    allowed_roles = [User.Role.INSURANCE, User.Role.INSURANCE_OFFICER, User.Role.FACILITY_MANAGER]
 
-    @transaction.atomic
     def post(self, request, pk):
-        account = _insurance_account(request)
-        claim = InsuranceClaim.objects.select_for_update().filter(pk=pk, provider=account).first()
+        insurance_account, denied = require_provider_account(request, User.Role.INSURANCE)
+        if denied:
+            return denied
+        claim = InsuranceClaim.objects.filter(pk=pk, provider=insurance_account).first()
         if claim is None:
-            return err("Claim not found.", drf_status.HTTP_404_NOT_FOUND)
-        action = str(request.data.get("action", "")).lower()
-        reason = str(request.data.get("reason", "")).strip()
-        status_map = {
-            "start_review": InsuranceClaim.Status.IN_REVIEW,
-            "query": InsuranceClaim.Status.QUERY,
-            "approve": InsuranceClaim.Status.APPROVED,
-            "partial": InsuranceClaim.Status.PARTIALLY_APPROVED,
-            "reject": InsuranceClaim.Status.REJECTED,
-            "cancel": InsuranceClaim.Status.CANCELLED,
-        }
-        if action == "mark_paid":
-            return self._mark_paid(request, claim)
-        if action not in status_map:
-            return err("action must be start_review, query, approve, partial, reject, cancel or mark_paid.")
-        if action in {"query", "partial", "reject", "cancel"} and not reason:
-            return err("A reason is required for this decision.")
-        approved_amount = int(request.data.get("approved_amount") or 0)
-        if action == "approve" and approved_amount == 0:
-            approved_amount = claim.amount
-        if approved_amount > claim.amount:
-            return err("approved_amount cannot exceed the requested amount.")
-        claim.status = status_map[action]
-        claim.approved_amount = approved_amount if action in {"approve", "partial"} else 0
-        claim.patient_responsibility = max(claim.amount - claim.approved_amount, 0)
-        claim.decision_reason = reason
-        claim.reviewed_by = request.user
-        claim.reviewed_at = timezone.now()
-        claim.save()
-
-        item_decisions = request.data.get("items") or []
-        by_id = {str(row.get("id")): row for row in item_decisions}
-        if by_id:
-            for item in claim.items.all():
-                row = by_id.get(str(item.id))
-                if not row:
-                    continue
-                item.approved_amount = min(int(row.get("approved_amount") or 0), item.requested_amount)
-                item.status = str(row.get("status") or (
-                    InsuranceClaimItem.Status.APPROVED if item.approved_amount == item.requested_amount
-                    else InsuranceClaimItem.Status.PARTIALLY_APPROVED if item.approved_amount
-                    else InsuranceClaimItem.Status.REJECTED
-                ))
-                item.reason = str(row.get("reason", ""))
-                item.save()
-        elif action in {"approve", "partial", "reject"}:
-            remaining = claim.approved_amount
-            for item in claim.items.all():
-                item.approved_amount = min(item.requested_amount, remaining)
-                remaining -= item.approved_amount
-                item.status = (
-                    InsuranceClaimItem.Status.APPROVED if item.approved_amount == item.requested_amount
-                    else InsuranceClaimItem.Status.PARTIALLY_APPROVED if item.approved_amount
-                    else InsuranceClaimItem.Status.REJECTED
-                )
-                item.reason = reason
-                item.save()
-
-        _audit_insurance(
-            request,
-            f"insurance.claim.{action}",
-            claim,
-            patient=claim.patient,
-            metadata={"reason": reason, "approved_amount": claim.approved_amount},
-        )
-        _notify_insurance(
-            claim.patient,
-            f"Claim {claim.get_status_display().lower()}",
-            f"Claim {claim.claim_number} is {claim.get_status_display().lower()}.",
-            metadata={"claim_id": claim.id},
-        )
+            return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
+        from operations.models import ClaimAssessment
+        if ClaimAssessment.objects.filter(claim=claim).exists():
+            return err("This claim must be decided through its benefit assessment workflow.", 409)
+        action = request.data.get("action")
+        if action == "approve":
+            claim.status = InsuranceClaim.Status.APPROVED
+        elif action == "reject":
+            claim.status = InsuranceClaim.Status.REJECTED
+        else:
+            return err("action must be approve or reject.")
+        claim.save(update_fields=["status"])
         return Response(InsuranceClaimSerializer(claim).data)
-
-    def _mark_paid(self, request, claim):
-        if claim.status not in {InsuranceClaim.Status.APPROVED, InsuranceClaim.Status.PARTIALLY_APPROVED}:
-            return err("Only approved claims can be remitted.", 409)
-        paid_amount = int(request.data.get("paid_amount") or claim.approved_amount)
-        if paid_amount <= 0 or paid_amount > claim.approved_amount:
-            return err("paid_amount must be greater than zero and cannot exceed the approved amount.")
-        payment_reference = str(request.data.get("payment_reference", "")).strip()
-        if not payment_reference:
-            return err("payment_reference is required.")
-        remittance_number = str(request.data.get("remittance_number", "")).strip() or f"REM-{timezone.now():%Y%m%d}-{claim.id}"
-        remittance = InsuranceRemittance.objects.create(
-            provider=claim.provider,
-            claim=claim,
-            remittance_number=remittance_number,
-            paid_amount=paid_amount,
-            payment_reference=payment_reference,
-            paid_on=request.data.get("paid_on") or timezone.localdate(),
-            notes=str(request.data.get("notes", "")),
-            created_by=request.user,
-        )
-        total_paid = claim.remittances.aggregate(total=Sum("paid_amount"))["total"] or 0
-        if total_paid >= claim.approved_amount:
-            claim.status = InsuranceClaim.Status.PAID
-            claim.paid_at = timezone.now()
-            claim.save(update_fields=["status", "paid_at", "updated_at"])
-        _audit_insurance(request, "insurance.remittance.created", remittance, patient=claim.patient)
-        _notify_insurance(
-            claim.patient,
-            "Insurance remittance recorded",
-            f"Payment of {paid_amount:,} UGX was recorded for claim {claim.claim_number}.",
-            metadata={"claim_id": claim.id, "remittance_id": remittance.id},
-        )
-        return Response(InsuranceClaimSerializer(claim).data)
-
-
-class RemittanceListView(APIView):
-    permission_classes = [IsRole]
-    allowed_roles = [User.Role.PATIENT, *INSURANCE_REVIEW_ROLES]
-
-    def get(self, request):
-        qs = InsuranceRemittance.objects.select_related("claim__patient", "provider", "created_by")
-        if request_role(request) == User.Role.PATIENT:
-            qs = qs.filter(claim__patient=request.user)
-        elif request_role(request) != User.Role.ADMIN:
-            account = provider_account_for(request.user, User.Role.INSURANCE)
-            qs = qs.filter(provider=account) if account else qs.none()
-        return Response(InsuranceRemittanceSerializer(qs[:500], many=True).data)

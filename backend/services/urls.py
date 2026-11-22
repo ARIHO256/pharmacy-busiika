@@ -1,6 +1,9 @@
 from django.urls import path
 
-from . import views
+from . import pharmacy_prescription_views as rx, views
+from .pharmacy_sales import PharmacyCounterSaleView, PharmacySaleReceiptView, PharmacyShiftCloseView, PharmacyShiftView
+
+from .taxonomy_views import TaxonomyManagementView, TaxonomyNodeManagementView
 
 urlpatterns = [
     # Public provider directories
@@ -10,30 +13,36 @@ urlpatterns = [
     path("insurers/", views.InsurerListView.as_view()),
 
     # Pharmacy
+    path("medicine-taxonomy/manage/", TaxonomyManagementView.as_view()),
+    path("medicine-taxonomy/manage/<slug:node_id>/", TaxonomyNodeManagementView.as_view()),
+    path("medicine-taxonomy/", views.MedicineTaxonomyView.as_view()),
     path("medicines/", views.MedicineListCreateView.as_view()),
     path("medicines/<int:pk>/", views.MedicineDetailView.as_view()),
     path("cart/", views.CartListCreateView.as_view()),
     path("cart/<int:pk>/", views.CartDetailView.as_view()),
     path("orders/checkout/", views.CheckoutView.as_view()),
     path("orders/", views.OrderListView.as_view()),
+    path("pharmacy/counter-sales/", PharmacyCounterSaleView.as_view()),
+    path("pharmacy/shifts/", PharmacyShiftView.as_view()),
+    path("pharmacy/shifts/<int:pk>/close/", PharmacyShiftCloseView.as_view()),
+    path("orders/<int:pk>/receipt/", PharmacySaleReceiptView.as_view()),
     path("orders/<int:pk>/update/", views.OrderUpdateView.as_view()),
     path("pharmacy-orders/", views.PharmacyOrderListView.as_view()),
     path("pharmacy-orders/<int:pk>/update/", views.PharmacyOrderUpdateView.as_view()),
-    path("pharmacy-orders/<int:pk>/dispensing/", views.DispensingRecordListCreateView.as_view()),
+    path("pharmacy-orders/<int:pk>/review/", rx.PharmacyPrescriptionReviewView.as_view()),
+    path("pharmacy-orders/<int:pk>/substitutions/", rx.PharmacySubstitutionRequestView.as_view()),
+    path("pharmacy-substitutions/", rx.PrescriberSubstitutionView.as_view()),
+    path("pharmacy-substitutions/<int:pk>/", rx.PrescriberSubstitutionView.as_view()),
     path("suppliers/", views.SupplierListCreateView.as_view()),
     path("suppliers/<int:pk>/", views.SupplierDetailView.as_view()),
 
     # Lab
-    path("lab-panels/", views.LabTestPanelListCreateView.as_view()),
-    path("lab-panels/<int:pk>/", views.LabTestPanelDetailView.as_view()),
-    path("lab-panels/<int:pk>/order/", views.LabTestPanelOrderView.as_view()),
     path("lab-tests/", views.LabTestListCreateView.as_view()),
     path("lab-tests/<int:pk>/", views.LabTestDetailView.as_view()),
     path("lab-orders/", views.LabOrderListCreateView.as_view()),
     path("lab-orders/manage/", views.LabOrderManageView.as_view()),
     path("lab-orders/<int:pk>/update/", views.LabOrderUpdateView.as_view()),
     path("lab-orders/<int:pk>/results/", views.LabResultListCreateView.as_view()),
-    path("lab-orders/<int:pk>/specimen-events/", views.SpecimenEventListCreateView.as_view()),
     path("lab-results/<int:pk>/acknowledge/", views.CriticalResultAcknowledgeView.as_view()),
 
     # Hospital
@@ -49,15 +58,9 @@ urlpatterns = [
     # Insurance
     path("policies/", views.PolicyListCreateView.as_view()),
     path("policies/<int:pk>/", views.PolicyDetailView.as_view()),
-    path("policies/<int:policy_id>/benefits/", views.BenefitRuleListCreateView.as_view()),
-    path("policy-benefits/<int:pk>/", views.BenefitRuleDetailView.as_view()),
     path("coverage/verify/", views.CoverageVerifyView.as_view()),
-    path("coverage/eligibility-history/", views.EligibilityHistoryView.as_view()),
     path("coverage/", views.CoverageListCreateView.as_view()),
-    path("preauthorizations/", views.PreauthorizationListCreateView.as_view()),
-    path("preauthorizations/<int:pk>/decide/", views.PreauthorizationDecisionView.as_view()),
     path("claims/", views.ClaimListCreateView.as_view()),
     path("claims/manage/", views.ClaimManageView.as_view()),
     path("claims/<int:pk>/decide/", views.ClaimDecideView.as_view()),
-    path("remittances/", views.RemittanceListView.as_view()),
 ]

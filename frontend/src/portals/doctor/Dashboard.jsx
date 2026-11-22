@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { appointmentApi, chatApi, paymentApi, workforceApi } from '../../api/endpoints'
+import { appointmentApi, chatApi, paymentApi } from '../../api/endpoints'
 import { useAuth } from '../../auth/AuthContext'
 import HealthIcon from '../../components/icons/HealthIcon'
 import { Badge, Card, Spinner, Stat, Table } from '../../components/ui'
@@ -20,13 +20,11 @@ export default function Dashboard() {
   const [appointments, setAppointments] = useState(null)
   const [earnings, setEarnings] = useState(null)
   const [notifications, setNotifications] = useState([])
-  const [clinicQueue, setClinicQueue] = useState([])
 
   useEffect(() => {
     appointmentApi.list().then((response) => setAppointments(response.data || [])).catch(() => setAppointments([]))
     paymentApi.earnings().then((response) => setEarnings(response.data)).catch(() => setEarnings(null))
     chatApi.notifications().then((response) => setNotifications(Array.isArray(response.data) ? response.data : response.data?.results || [])).catch(() => {})
-    workforceApi.visits({ status: 'waiting_clinician' }).then((response) => setClinicQueue(response.data || [])).catch(() => setClinicQueue([]))
   }, [])
 
   const data = useMemo(() => {
@@ -54,25 +52,12 @@ export default function Dashboard() {
         </div>
       </section>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Today's appointments" value={data.todays.length} icon="calendar" caption="Scheduled for today" />
         <Stat label="Pending requests" value={data.pending.length} icon="clock" tone="text-amber-600" caption="Awaiting your decision" />
-        <Stat label="Walk-in queue" value={clinicQueue.length} icon="doctor" tone="text-emerald-600" caption="Triaged patients waiting for you" />
         <Stat label="Total earnings" value={earnings ? fmtMoney(earnings.total ?? earnings.total_earnings ?? 0) : '—'} icon="money" caption="Provider earnings recorded" />
         <Stat label="Unread notifications" value={data.unread} icon="bell" tone="text-sky-600" caption="Clinical and account updates" />
       </div>
-
-      {clinicQueue.length > 0 && (
-        <Card title="Walk-in clinic queue" subtitle="Triaged walk-in patients waiting for a clinician" icon="doctor" actions={<Link to="clinical" className="text-sm font-semibold text-primary-700 hover:underline">Open clinical workspace</Link>}>
-          <Table columns={[
-            { key: 'queue_number', label: 'Queue', render: (visit) => <strong>#{visit.queue_number || '—'}</strong> },
-            { key: 'patient', label: 'Patient', render: (visit) => visit.patient_name || `Patient #${visit.patient}` },
-            { key: 'reason', label: 'Complaint', render: (visit) => visit.reason || visit.triage?.chief_complaint || '—' },
-            { key: 'priority', label: 'Priority', render: (visit) => <Badge color={visit.priority === 'emergency' ? 'red' : visit.priority === 'urgent' ? 'yellow' : 'blue'}>{visit.priority}</Badge> },
-            { key: 'checked_in_at', label: 'Waiting since', render: (visit) => String(visit.checked_in_at || '').slice(11, 16) },
-          ]} rows={clinicQueue.slice(0, 6)} />
-        </Card>
-      )}
 
       <Card title="Clinical workflow" subtitle="Shortcuts follow the doctor journey defined in the platform flow" icon="activity">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">

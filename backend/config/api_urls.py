@@ -1,4 +1,4 @@
-"""HealthPilot public API route table.
+"""MyDoctor public API route table.
 
 Mounted at both ``/api/`` for backwards compatibility and ``/api/v1/`` for
 explicitly versioned integrations.  New partner integrations should use v1.
@@ -22,7 +22,4 @@ urlpatterns = [
     path("interoperability/", include("interoperability.urls")),
     path("workforce/", include("workforce.urls")),
     path("operations/", include("operations.urls")),
-    path("enterprise/", include("enterprise.urls")),
-    path("journeys/", include("journeys.urls")),
-    path("fhir/", include("enterprise.fhir_urls")),
 ]

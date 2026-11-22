@@ -1,8 +1,6 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from accounts.roles import BOOKABLE_PROVIDER_ROLES
-
 from .models import Appointment, AppointmentStatusHistory, Availability
 
 User = get_user_model()
@@ -18,10 +16,9 @@ def _full_name(user):
 def _doctor_specialization(doctor):
     """Read specialization from accounts.DoctorProfile without hard dependency."""
     profile = getattr(doctor, "doctor_profile", None)
-    if profile is not None:
-        return getattr(profile, "specialization", "") or ""
-    staff = getattr(doctor, "staff_profile", None)
-    return getattr(staff, "specialty", "") or ""
+    if profile is None:
+        return ""
+    return getattr(profile, "specialization", "") or ""
 
 
 class AvailabilitySerializer(serializers.ModelSerializer):
@@ -84,7 +81,6 @@ class AppointmentSerializer(serializers.ModelSerializer):
             "id",
             "patient",
             "doctor",
-            "booked_by",
             "patient_name",
             "doctor_name",
             "doctor_specialization",
@@ -114,7 +110,6 @@ class AppointmentSerializer(serializers.ModelSerializer):
 
 class AppointmentCreateSerializer(serializers.Serializer):
     doctor_id = serializers.IntegerField()
-    patient_id = serializers.IntegerField(required=False)
     date = serializers.DateField()
     start_time = serializers.TimeField()
     type = serializers.ChoiceField(
@@ -134,7 +129,7 @@ class AppointmentCreateSerializer(serializers.Serializer):
 
     def validate_doctor_id(self, value):
         try:
-            doctor = User.objects.get(pk=value, role__in=BOOKABLE_PROVIDER_ROLES)
+            doctor = User.objects.get(pk=value, role=User.Role.DOCTOR)
         except User.DoesNotExist:
-            raise serializers.ValidationError("Bookable healthcare professional not found")
+            raise serializers.ValidationError("Doctor not found")
         return doctor

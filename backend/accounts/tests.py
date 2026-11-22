@@ -1,29 +1,15 @@
-import re
-from unittest.mock import patch
-
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from rest_framework.test import APIClient
 
 from registry.models import Organization
 
-from .models import (
-    DoctorProfile,
-    OneTimeToken,
-    PatientProfile,
-    PatientRelationship,
-    ProviderProfile,
-    SecurityEvent,
-    User,
-)
+from .models import DoctorProfile, PatientProfile, ProviderProfile, User
 
 REGISTER_URL = "/api/auth/register/"
 ME_PROFILE_URL = "/api/auth/me/profile/"
 DOCTORS_URL = "/api/doctors/"
 VERIFY_UPLOAD_URL = "/api/doctors/verify-upload/"
-PHONE_LOGIN_REQUEST_URL = "/api/auth/phone-login/request/"
-PHONE_LOGIN_VERIFY_URL = "/api/auth/phone-login/verify/"
-GOOGLE_LOGIN_URL = "/api/auth/google/"
 
 
 class RegisterTests(TestCase):
@@ -97,8 +83,6 @@ class RegisterTests(TestCase):
                 "role": "pharmacy",
                 "organization_name": "City Pharmacy",
                 "license_number": "PHA-001",
-                "license_issuer": "National Drug Authority",
-                "license_expires_on": "2031-12-31",
                 "license_document": licence,
                 "district": "Kampala",
                 "address": "Plot 1 Health Road",
@@ -133,8 +117,6 @@ class RegisterTests(TestCase):
                 "organization_type": "clinic",
                 "organization_name": "Hope Clinic",
                 "license_number": "CLINIC-001",
-                "license_issuer": "Ministry of Health",
-                "license_expires_on": "2031-12-31",
                 "license_document": licence,
                 "district": "Kampala",
                 "address": "Wandegeya",
@@ -337,196 +319,3 @@ class MyProfileTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(ProviderProfile.objects.get(user=user).license_number, "")
-
-
-class DependentCareTests(TestCase):
-    def setUp(self):
-        self.client = APIClient()
-        self.parent = User.objects.create_user(
-            email="parent@example.com", password="StrongPass123!", role="patient",
-            first_name="Amina", last_name="Parent",
-        )
-        PatientProfile.objects.create(user=self.parent, location="Kampala")
-        self.client.force_authenticate(self.parent)
-
-    def test_parent_creates_distinct_child_patient_identity(self):
-        response = self.client.post(
-            "/api/auth/dependents/",
-            {
-                "first_name": "Joy",
-                "last_name": "Parent",
-                "dob": "2018-04-12",
-                "gender": "female",
-                "relationship": "child",
-                "blood_group": "O+",
-            },
-            format="json",
-        )
-        self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["status"], "active")
-        relationship = PatientRelationship.objects.get(caregiver=self.parent)
-        self.assertEqual(relationship.patient.role, User.Role.PATIENT)
-        self.assertFalse(relationship.patient.has_usable_password())
-        self.assertEqual(relationship.patient.patient_profile.blood_group, "O+")
-
-    def test_adult_dependent_without_authority_is_pending(self):
-        response = self.client.post(
-            "/api/auth/dependents/",
-            {
-                "first_name": "Adult",
-                "last_name": "Dependent",
-                "dob": "1980-04-12",
-                "relationship": "caregiver",
-            },
-            format="json",
-        )
-        self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["status"], "pending")
-
-
-class PhoneLoginTests(TestCase):
-    def setUp(self):
-        self.client = APIClient()
-        self.user = User.objects.create_user(
-            email="phone-user@example.com",
-            password="StrongPass123!",
-            role="patient",
-            phone="0700000001",
-        )
-
-    def _request_code(self, phone="0700000001"):
-        with patch("communication.providers.send_sms") as mock_send:
-            resp = self.client.post(PHONE_LOGIN_REQUEST_URL, {"phone": phone}, format="json")
-        return resp, mock_send
-
-    @staticmethod
-    def _code_from_sms(mock_send):
-        body = mock_send.call_args[0][2]
-        return re.search(r"(\d{6})", body).group(1)
-
-    def test_request_and_verify_issues_jwt_and_marks_phone_verified(self):
-        resp, mock_send = self._request_code()
-        self.assertEqual(resp.status_code, 200, resp.data)
-        self.assertIn("If that phone number is registered", resp.data["detail"])
-        mock_send.assert_called_once()
-        self.assertEqual(mock_send.call_args[0][0], "0700000001")
-        token = OneTimeToken.objects.get(
-            user=self.user, purpose=OneTimeToken.Purpose.PHONE_VERIFICATION
-        )
-        self.assertIsNone(token.consumed_at)
-
-        code = self._code_from_sms(mock_send)
-        verify = self.client.post(
-            PHONE_LOGIN_VERIFY_URL, {"phone": "0700000001", "code": code}, format="json"
-        )
-        self.assertEqual(verify.status_code, 200, verify.data)
-        self.assertIn("access", verify.data)
-        self.assertIn("refresh", verify.data)
-        self.user.refresh_from_db()
-        self.assertIsNotNone(self.user.phone_verified_at)
-        self.assertTrue(
-            SecurityEvent.objects.filter(
-                user=self.user, event_type=SecurityEvent.Type.LOGIN_SUCCESS
-            ).exists()
-        )
-
-        # tokens actually work
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {verify.data['access']}")
-        me = self.client.get("/api/auth/me/")
-        self.assertEqual(me.status_code, 200)
-        self.assertEqual(me.data["email"], "phone-user@example.com")
-
-    def test_wrong_code_is_rejected(self):
-        _, mock_send = self._request_code()
-        code = self._code_from_sms(mock_send)
-        wrong = "000000" if code != "000000" else "111111"
-        verify = self.client.post(
-            PHONE_LOGIN_VERIFY_URL, {"phone": "0700000001", "code": wrong}, format="json"
-        )
-        self.assertEqual(verify.status_code, 400)
-        self.assertNotIn("access", verify.data)
-        self.user.refresh_from_db()
-        self.assertIsNone(self.user.phone_verified_at)
-
-    def test_unknown_phone_returns_generic_success_without_sending(self):
-        resp, mock_send = self._request_code(phone="0799999999")
-        self.assertEqual(resp.status_code, 200, resp.data)
-        self.assertIn("If that phone number is registered", resp.data["detail"])
-        mock_send.assert_not_called()
-        self.assertFalse(OneTimeToken.objects.exists())
-
-
-@override_settings(GOOGLE_CLIENT_ID="test-google-client-id")
-class GoogleLoginTests(TestCase):
-    def setUp(self):
-        self.client = APIClient()
-        self.claims = {
-            "email": "social@example.com",
-            "email_verified": True,
-            "given_name": "So",
-            "family_name": "Cial",
-        }
-
-    def _post(self, claims=None):
-        payload = self.claims if claims is None else claims
-        with patch(
-            "google.oauth2.id_token.verify_oauth2_token", return_value=payload
-        ) as mock_verify:
-            resp = self.client.post(
-                GOOGLE_LOGIN_URL, {"id_token": "raw-google-token"}, format="json"
-            )
-        return resp, mock_verify
-
-    def test_google_login_creates_patient_and_issues_jwt(self):
-        resp, mock_verify = self._post()
-        self.assertEqual(resp.status_code, 200, resp.data)
-        mock_verify.assert_called_once()
-        args = mock_verify.call_args[0]
-        self.assertEqual(args[0], "raw-google-token")
-        self.assertEqual(args[2], "test-google-client-id")
-        self.assertIn("access", resp.data)
-        self.assertIn("refresh", resp.data)
-        user = User.objects.get(email="social@example.com")
-        self.assertEqual(user.role, "patient")
-        self.assertFalse(user.has_usable_password())
-        self.assertIsNotNone(user.email_verified_at)
-        self.assertTrue(
-            SecurityEvent.objects.filter(
-                user=user, event_type=SecurityEvent.Type.LOGIN_SUCCESS
-            ).exists()
-        )
-
-    def test_google_login_reuses_existing_user_regardless_of_role(self):
-        existing = User.objects.create_user(
-            email="social@example.com", password="StrongPass123!", role="doctor"
-        )
-        resp, _ = self._post()
-        self.assertEqual(resp.status_code, 200, resp.data)
-        self.assertEqual(User.objects.filter(email="social@example.com").count(), 1)
-        existing.refresh_from_db()
-        self.assertEqual(existing.role, "doctor")
-        self.assertIsNotNone(existing.email_verified_at)
-
-    def test_invalid_google_token_is_rejected(self):
-        with patch(
-            "google.oauth2.id_token.verify_oauth2_token",
-            side_effect=ValueError("Token expired"),
-        ):
-            resp = self.client.post(
-                GOOGLE_LOGIN_URL, {"id_token": "bad-token"}, format="json"
-            )
-        self.assertEqual(resp.status_code, 401)
-        self.assertFalse(User.objects.filter(email="social@example.com").exists())
-
-    def test_unverified_google_email_is_rejected(self):
-        resp, _ = self._post(claims={"email": "social@example.com", "email_verified": False})
-        self.assertEqual(resp.status_code, 400)
-        self.assertFalse(User.objects.filter(email="social@example.com").exists())
-
-    @override_settings(GOOGLE_CLIENT_ID="")
-    def test_missing_google_client_id_returns_503(self):
-        resp = self.client.post(
-            GOOGLE_LOGIN_URL, {"id_token": "raw-google-token"}, format="json"
-        )
-        self.assertEqual(resp.status_code, 503)
-        self.assertIn("not configured", resp.data["detail"])

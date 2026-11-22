@@ -68,25 +68,3 @@ def active_break_glass(requester, patient):
         status=BreakGlassAccess.Status.ACTIVE,
         expires_at__gt=timezone.now(),
     ).order_by("-started_at").first()
-
-
-def active_privileged_access(user, patient, required_scope=None, *, write=False):
-    """Return a current patient-specific administrator elevation grant if present."""
-    from .models import PrivilegedAccessGrant
-
-    if not user or not getattr(user, "is_authenticated", False):
-        return None
-    now = timezone.now()
-    qs = PrivilegedAccessGrant.objects.filter(
-        requester=user,
-        patient=patient,
-        status=PrivilegedAccessGrant.Status.ACTIVE,
-        expires_at__gt=now,
-    ).order_by("-approved_at")
-    for grant in qs:
-        if write and grant.read_only:
-            continue
-        if required_scope and required_scope not in set(grant.scopes or []):
-            continue
-        return grant
-    return None

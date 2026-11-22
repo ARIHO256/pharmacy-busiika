@@ -10,9 +10,6 @@ const colorMap = {
   pending: 'yellow',
   booked: 'yellow',
   submitted: 'yellow',
-  in_review: 'blue',
-  query: 'yellow',
-  partially_approved: 'blue',
   confirmed: 'blue',
   prepared: 'blue',
   processing: 'blue',
@@ -21,14 +18,10 @@ const colorMap = {
   completed: 'green',
   approved: 'green',
   valid: 'green',
-  eligible: 'green',
   paid: 'green',
   cancelled: 'red',
   rejected: 'red',
   failed: 'red',
-  inactive: 'red',
-  expired: 'red',
-  waiting_period: 'yellow',
 }
 
 export const statusColor = (status) => colorMap[String(status || '').toLowerCase()] || 'slate'

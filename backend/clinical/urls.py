@@ -15,7 +15,6 @@ from .views import (
     MedicationListCreateView,
     ObservationListCreateView,
     ReferralListCreateView,
-    ReferralActionView,
     TimelineView,
 )
 
@@ -34,6 +33,5 @@ urlpatterns = [
     path("encounters/<int:pk>/finalize/", EncounterFinalizeView.as_view()),
     path("encounters/<int:pk>/amend/", EncounterAmendView.as_view()),
     path("referrals/", ReferralListCreateView.as_view()),
-    path("referrals/<int:pk>/action/", ReferralActionView.as_view()),
     path("care-plans/", CarePlanListCreateView.as_view()),
 ]

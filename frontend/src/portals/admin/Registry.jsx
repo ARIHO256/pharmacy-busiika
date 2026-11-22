@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import client from '../../api/client'
 import { interoperabilityApi, registryApi } from '../../api/endpoints'
-import { Alert, Badge, Button, Card, EmptyState, SectionHeading, Spinner, Stat, Table } from '../../components/ui'
+import { Alert, Badge, Button, Card, EmptyState, Modal, Select, SectionHeading, Spinner, Stat, Table } from '../../components/ui'
 
 const statusColor = {
   pending: 'yellow', verified: 'green', rejected: 'red', suspended: 'red',
@@ -26,6 +26,9 @@ export default function Registry() {
   const [outbox, setOutbox] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
+  const [pharmacy, setPharmacy] = useState(null)
+  const [parentId, setParentId] = useState('')
+  const [affiliationError, setAffiliationError] = useState('')
 
   async function load() {
     setError('')
@@ -50,6 +53,21 @@ export default function Registry() {
     pendingCredentials: credentials?.filter((item) => item.status === 'pending').length || 0,
     failedEvents: outbox?.filter((item) => item.status === 'failed').length || 0,
   }), [organizations, credentials, outbox])
+
+  async function saveAffiliation(event) {
+    event.preventDefault()
+    setBusy('pharmacy-affiliation')
+    setAffiliationError('')
+    try {
+      await registryApi.updateOrganization(pharmacy.public_id, { parent_facility: parentId || null })
+      setPharmacy(null)
+      await load()
+    } catch (err) {
+      setAffiliationError(err.response?.data?.parent_facility?.[0] || 'The pharmacy affiliation could not be saved.')
+    } finally {
+      setBusy('')
+    }
+  }
 
   async function setOrganizationStatus(organization, status) {
     const reason = reasonFor(status, 'organization')
@@ -80,6 +98,16 @@ export default function Registry() {
   const organizationColumns = [
     { key: 'legal_name', label: 'Organization', render: (row) => <div><div className="font-semibold text-slate-800">{row.trading_name || row.legal_name}</div><div className="text-xs text-slate-400">{row.owner_email || 'No owner'} · {row.contact_email || 'No contact email'}</div><div className="mt-1 max-w-md text-xs text-slate-500">{row.services_description || 'No service description supplied.'}</div></div> },
     { key: 'organization_type', label: 'Type', render: (row) => <Badge color="blue">{row.organization_type}</Badge> },
+    { key: 'parent_facility', label: 'Pharmacy setup', render: (row) => row.organization_type === 'pharmacy' ? (
+      <div className="space-y-1">
+        <div>{row.parent_facility_name || 'Standalone pharmacy'}</div>
+        <Button variant="outline" disabled={!!busy} onClick={() => {
+          setParentId(row.parent_facility || '')
+          setAffiliationError('')
+          setPharmacy(row)
+        }}>Change affiliation</Button>
+      </div>
+    ) : '—' },
     { key: 'license_number', label: 'Licence', render: (row) => <div><div>{row.license_number || '—'}</div>{row.license_document_url && <button className="mt-1 text-xs font-semibold text-teal-700 hover:underline" onClick={() => viewDocument(row.license_document_url)}>View protected document</button>}</div> },
     { key: 'district', label: 'District', render: (row) => row.district || '—' },
     { key: 'status', label: 'Status', render: (row) => <Badge color={statusColor[row.status] || 'slate'}>{row.status}</Badge> },
@@ -116,6 +144,18 @@ export default function Registry() {
       <Stat label="Credentials pending" value={metrics.pendingCredentials} icon="🪪" tone="text-violet-700" />
       <Stat label="Failed outbox events" value={metrics.failedEvents} icon="↻" tone="text-rose-600" />
     </div>
+    <Modal open={Boolean(pharmacy)} title="Pharmacy affiliation" onClose={() => { if (!busy) setPharmacy(null) }}>
+      <form className="space-y-4" onSubmit={saveAffiliation}>
+        <p className="text-sm text-slate-600">{pharmacy?.legal_name}</p>
+        {affiliationError && <Alert tone="danger">{affiliationError}</Alert>}
+        <Select label="Operating facility" value={parentId} onChange={(event) => setParentId(event.target.value)}>
+          <option value="">Standalone pharmacy</option>
+          {organizations.filter((row) => row.active && row.status === 'verified' && ['clinic', 'hospital'].includes(row.organization_type))
+            .map((row) => <option key={row.id} value={row.id}>{row.legal_name} · {row.organization_type}</option>)}
+        </Select>
+        <Button disabled={!!busy}>Save affiliation</Button>
+      </form>
+    </Modal>
     <Card title={`Organizations (${organizations.length})`}><Table columns={organizationColumns} rows={organizations} empty="No registered healthcare organizations." /></Card>
     <Card title={`Practitioner credentials (${credentials.length})`}><Table columns={credentialColumns} rows={credentials} empty="No practitioner credentials have been submitted." /></Card>
     <Card title="Recent integration outbox">{!outbox.length ? <EmptyState icon="↻" title="No domain events yet" description="Clinical, consent, booking and financial events will be recorded here before delivery to external systems." /> : <div className="space-y-2">{outbox.slice(0, 12).map((event) => <div key={event.id} className="flex flex-col gap-2 rounded-xl border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="font-medium text-slate-800">{event.event_type}</div><div className="mt-1 text-xs text-slate-400">{event.aggregate_type} {event.aggregate_id} · v{event.event_version}</div></div><Badge color={statusColor[event.status] || 'yellow'}>{event.status}</Badge></div>)}</div>}</Card>

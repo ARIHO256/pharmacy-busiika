@@ -1,5 +1,5 @@
 {
-  "name": "healthpilot-frontend",
+  "name": "mydoctor-frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -12,9 +12,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf node_modules dist package-lock.json",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "vitest run --passWithNoTests && node ../scripts/frontend-acceptance.mjs && node ../scripts/frontend-api-contract-audit.mjs"
+    "dev:pharmacy": "vite --config vite.pharmacy.config.js",
+    "build:pharmacy": "vite build --config vite.pharmacy.config.js",
+    "preview:pharmacy": "vite preview --config vite.pharmacy.config.js"
   },
   "dependencies": {
     "axios": "1.7.9",
@@ -27,7 +27,6 @@
     "autoprefixer": "10.4.20",
     "postcss": "8.4.49",
     "tailwindcss": "3.4.15",
-    "vite": "5.4.11",
-    "vitest": "^2.1.9"
+    "vite": "5.4.11"
   }
 }

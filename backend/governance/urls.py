@@ -9,8 +9,6 @@ from .views import (
     ConsentListCreateView,
     ConsentRevokeView,
     PatientConsentStatusView,
-    PrivilegedAccessListCreateView,
-    PrivilegedAccessDecisionView,
 )
 
 urlpatterns = [
@@ -22,6 +20,4 @@ urlpatterns = [
     path("break-glass/<int:pk>/review/", BreakGlassReviewView.as_view()),
     path("compliance/overview/", ComplianceOverviewView.as_view()),
     path("audit/", AuditEventListView.as_view()),
-    path("privileged-access/", PrivilegedAccessListCreateView.as_view(), name="privileged-access-list"),
-    path("privileged-access/<int:pk>/decision/", PrivilegedAccessDecisionView.as_view(), name="privileged-access-decision"),
 ]

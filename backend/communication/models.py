@@ -35,6 +35,9 @@ class Conversation(models.Model):
 
 
 class Message(models.Model):
+    client_id = models.UUIDField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    read_at = models.DateTimeField(null=True, blank=True)
     conversation = models.ForeignKey(
         Conversation, on_delete=models.CASCADE, related_name="messages"
     )
@@ -50,6 +53,7 @@ class Message(models.Model):
 
     class Meta:
         ordering = ["created_at"]
+        constraints = [models.UniqueConstraint(fields=["conversation", "sender", "client_id"], condition=models.Q(client_id__isnull=False), name="unique_chat_client_message")]
 
     def __str__(self):
         return f"Message {self.pk} in conversation {self.conversation_id}"
@@ -93,12 +97,12 @@ class Notification(models.Model):
 
 
 class NotificationDelivery(models.Model):
+    next_attempt_at = models.DateTimeField(null=True, blank=True)
     class Channel(models.TextChoices):
         IN_APP = "in_app", "In application"
         EMAIL = "email", "Email"
         SMS = "sms", "SMS"
         PUSH = "push", "Push notification"
-        WHATSAPP = "whatsapp", "WhatsApp"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -145,7 +149,6 @@ class NotificationPreference(models.Model):
     email_enabled = models.BooleanField(default=True)
     sms_enabled = models.BooleanField(default=False)
     push_enabled = models.BooleanField(default=False)
-    whatsapp_enabled = models.BooleanField(default=False)
     appointment_reminders = models.BooleanField(default=True)
     clinical_updates = models.BooleanField(default=True)
     payment_updates = models.BooleanField(default=True)
@@ -174,22 +177,3 @@ class NotificationTemplate(models.Model):
 
     def __str__(self):
         return self.code
-
-
-class DeviceRegistration(models.Model):
-    class Platform(models.TextChoices):
-        WEB = "web", "Web"
-        ANDROID = "android", "Android"
-        IOS = "ios", "iOS"
-
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notification_devices")
-    platform = models.CharField(max_length=20, choices=Platform.choices)
-    token = models.CharField(max_length=500, unique=True)
-    device_name = models.CharField(max_length=160, blank=True, default="")
-    active = models.BooleanField(default=True)
-    last_seen_at = models.DateTimeField(auto_now=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["-last_seen_at"]
-        indexes = [models.Index(fields=["user", "active", "last_seen_at"])]

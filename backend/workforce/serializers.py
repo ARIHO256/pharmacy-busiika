@@ -4,12 +4,8 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from enterprise.access import has_role_identity
-
-from config.uploads import validate_credential_upload
-
 from accounts.models import DoctorProfile, StaffProfile, User
-from accounts.roles import FACILITY_OPERATIONS_ROLES, PROFESSIONAL_ROLES
+from accounts.roles import FACILITY_OPERATIONS_ROLES
 
 from .models import (
     Department,
@@ -55,7 +51,7 @@ class StaffMembershipSerializer(serializers.ModelSerializer):
         return display_name(obj.user)
 
     def get_verification_status(self, obj):
-        if has_role_identity(obj.user, "doctor"):
+        if obj.user.role == "doctor":
             return getattr(getattr(obj.user, "doctor_profile", None), "status", "pending")
         return getattr(getattr(obj.user, "staff_profile", None), "status", "not_required")
 
@@ -100,7 +96,7 @@ class InvitationAcceptSerializer(serializers.Serializer):
     registration_number = serializers.CharField(max_length=140, required=False, allow_blank=True)
     license_issuer = serializers.CharField(max_length=180, required=False, allow_blank=True)
     license_expires_on = serializers.DateField(required=False, allow_null=True)
-    license_document = serializers.FileField(required=False, allow_null=True, validators=[validate_credential_upload])
+    license_document = serializers.FileField(required=False, allow_null=True)
 
     def validate_license_document(self, value):
         if not value:
@@ -138,7 +134,7 @@ class InvitationAcceptSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"first_name": "The staff member's full legal name is required."}
             )
-        if invitation.role in PROFESSIONAL_ROLES:
+        if invitation.role in {"doctor", "nurse", "pharmacist", "lab_technician"}:
             for field in ["registration_number", "license_document"]:
                 if not attrs.get(field):
                     raise serializers.ValidationError({field: "Professional licence information is required."})
@@ -157,6 +153,14 @@ class InvitationAcceptSerializer(serializers.Serializer):
 
 
 class PatientVisitSerializer(serializers.ModelSerializer):
+    laboratory_handoffs = serializers.SerializerMethodField()
+
+    def get_laboratory_handoffs(self, obj):
+        return [{
+            "id": order.pk, "destination": order.lab.display_name,
+            "status": order.status, "arrived_at": order.arrived_at,
+        } for order in obj.lab_orders.all()]
+
     patient_name = serializers.SerializerMethodField()
     patient_email = serializers.EmailField(source="patient.email", read_only=True)
     patient_phone = serializers.CharField(source="patient.phone", read_only=True)
@@ -172,7 +176,7 @@ class PatientVisitSerializer(serializers.ModelSerializer):
             "location", "patient", "patient_name", "patient_email", "patient_phone",
             "appointment", "registered_by", "assigned_doctor", "assigned_doctor_name",
             "assigned_nurse", "assigned_nurse_name", "visit_type", "status", "priority",
-            "reason", "triage_level", "checked_in_at", "checked_out_at", "updated_at",
+            "reason", "triage_level", "checked_in_at", "checked_out_at", "updated_at", "laboratory_handoffs",
         ]
         read_only_fields = [
             "visit_number", "queue_number", "organization", "registered_by", "checked_in_at",
@@ -213,15 +217,32 @@ class TriageRecordSerializer(serializers.ModelSerializer):
         return value
 
 
+class NursingHandoverSerializer(serializers.Serializer):
+    situation = serializers.CharField(max_length=2000)
+    background = serializers.CharField(max_length=2000, required=False, allow_blank=True)
+    assessment = serializers.CharField(max_length=2000)
+    next_actions = serializers.CharField(max_length=2000)
+
+
 class NursingNoteSerializer(serializers.ModelSerializer):
+    handover = serializers.JSONField(required=False)
     nurse_name = serializers.SerializerMethodField()
     patient_name = serializers.CharField(source="visit.patient.display_name", read_only=True)
     visit_number = serializers.CharField(source="visit.visit_number", read_only=True)
 
     class Meta:
         model = NursingNote
-        fields = ["id", "visit", "visit_number", "patient_name", "nurse", "nurse_name", "note_type", "note", "recorded_at"]
+        fields = ["id", "visit", "visit_number", "patient_name", "nurse", "nurse_name", "note_type", "note", "handover", "recorded_at"]
         read_only_fields = ["nurse", "recorded_at"]
+
+    def validate(self, attrs):
+        if attrs.get("handover") and attrs.get("note_type") != NursingNote.Type.HANDOVER:
+            raise serializers.ValidationError({"handover": "Structured fields require a handover note."})
+        if "handover" in attrs:
+            structured = NursingHandoverSerializer(data=attrs["handover"])
+            structured.is_valid(raise_exception=True)
+            attrs["handover"] = dict(structured.validated_data)
+        return attrs
 
     def get_nurse_name(self, obj):
         return display_name(obj.nurse)

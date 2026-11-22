@@ -1,6 +1,6 @@
 // Shared helpers for the four provider portals (pharmacy/lab/hospital/insurance).
 import { useCallback, useEffect, useState } from 'react'
-import { Badge, Button, Card, Input, Spinner } from '../../components/ui'
+import { Alert, Textarea, Badge, Button, Card, Input, Spinner } from '../../components/ui'
 import client from '../../api/client'
 
 export const money = (n) => `UGX ${Number(n || 0).toLocaleString()}`
@@ -12,9 +12,6 @@ const statusColors = {
   pending: 'yellow',
   booked: 'yellow',
   submitted: 'yellow',
-  in_review: 'blue',
-  query: 'yellow',
-  partially_approved: 'blue',
   confirmed: 'blue',
   prepared: 'blue',
   processing: 'blue',
@@ -22,12 +19,6 @@ const statusColors = {
   delivered: 'green',
   completed: 'green',
   approved: 'green',
-  paid: 'green',
-  eligible: 'green',
-  inactive: 'red',
-  expired: 'red',
-  waiting_period: 'yellow',
-  not_found: 'red',
   verified: 'green',
   cancelled: 'red',
   rejected: 'red',
@@ -99,6 +90,8 @@ export function ProviderProfile() {
         org_name: data.org_name || '',
         license_number: data.license_number || '',
         address: data.address || '',
+        district: data.district || '',
+        services_description: data.services_description || '',
       })
     }
   }, [data, form])
@@ -121,19 +114,12 @@ export function ProviderProfile() {
     }
   }
 
-  if (!loading && !error && !data) {
-    return (
-      <Card title="Organization profile">
-        <p className="text-sm text-slate-500">No organization profile is attached to this account yet. Complete your organization registration first.</p>
-      </Card>
-    )
-  }
-
-  if (loading || !form) return <Spinner />
   if (error) return <ErrorNote error={error} />
+  if (loading || !form) return <Spinner label="Loading organization profile…" />
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <>
+      <div className="max-w-2xl space-y-6">
         <Card
           title="Verification status"
           actions={<StatusBadge status={data?.status || 'pending'} />}
@@ -156,7 +142,12 @@ export function ProviderProfile() {
             )}
             <Input label="Organization name" value={form.org_name} onChange={set('org_name')} required />
             <Input label="License number" value={form.license_number} onChange={set('license_number')} />
-            <Input label="Address" value={form.address} onChange={set('address')} />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input label="District or region" value={form.district} onChange={set('district')} />
+              <Input label="Street address" value={form.address} onChange={set('address')} />
+            </div>
+            <Textarea label="Services description" value={form.services_description} onChange={set('services_description')} />
+            {data.verification_notes && <Alert tone="warning" title="Verification feedback">{data.verification_notes}</Alert>}
             <div className="pt-1">
               <Button type="submit" disabled={saving}>
                 {saving ? 'Saving…' : 'Save profile'}
@@ -165,5 +156,6 @@ export function ProviderProfile() {
           </form>
         </Card>
       </div>
+    </>
   )
 }

@@ -1,10 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 
-from config.uploads import validate_credential_upload
-
 from accounts.models import User
-from enterprise.access import can_review_compliance, is_platform_super_admin
 
 from .models import (
     CareRelationship,
@@ -23,9 +20,10 @@ class OrganizationLocationSerializer(serializers.ModelSerializer):
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
+    parent_facility_name = serializers.CharField(source="parent_facility.legal_name", read_only=True, default=None)
     locations = OrganizationLocationSerializer(many=True, read_only=True)
     owner_email = serializers.EmailField(source="owner.email", read_only=True)
-    license_document = serializers.FileField(write_only=True, required=False, allow_null=True, validators=[validate_credential_upload])
+    license_document = serializers.FileField(write_only=True, required=False, allow_null=True)
     license_document_url = serializers.SerializerMethodField()
 
     def get_license_document_url(self, obj):
@@ -33,7 +31,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
         user = getattr(request, "user", None)
         if not obj.license_document or not user or not user.is_authenticated:
             return None
-        if not (is_platform_super_admin(user) or can_review_compliance(user)) and obj.owner_id != user.id:
+        if user.role != User.Role.ADMIN and obj.owner_id != user.id:
             return None
         path = f"/api/registry/organizations/{obj.public_id}/license-document/"
         return request.build_absolute_uri(path) if request else path
@@ -48,9 +46,9 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "legal_name",
             "trading_name",
             "organization_type",
+            "parent_facility",
+            "parent_facility_name",
             "license_number",
-            "license_issued_on",
-            "license_expires_on",
             "license_document",
             "license_document_url",
             "services_description",
@@ -72,6 +70,21 @@ class OrganizationSerializer(serializers.ModelSerializer):
         organization_type = attrs.get(
             "organization_type", getattr(self.instance, "organization_type", None)
         )
+        if "parent_facility" in attrs:
+            user = getattr(self.context.get("request"), "user", None)
+            if getattr(user, "role", None) != User.Role.ADMIN:
+                raise serializers.ValidationError({"parent_facility": "A platform administrator must manage pharmacy affiliations."})
+        parent = attrs.get("parent_facility", getattr(self.instance, "parent_facility", None))
+        if parent and (
+            organization_type != Organization.Type.PHARMACY
+            or parent.pk == getattr(self.instance, "pk", None)
+            or parent.organization_type not in {Organization.Type.CLINIC, Organization.Type.HOSPITAL}
+        ):
+            raise serializers.ValidationError({"parent_facility": "Select a clinic or hospital for a pharmacy."})
+        if parent and "parent_facility" in attrs and (not parent.active or parent.status != Organization.Status.VERIFIED):
+            raise serializers.ValidationError({"parent_facility": "Select an active, verified facility."})
+        if self.instance and organization_type not in {Organization.Type.CLINIC, Organization.Type.HOSPITAL} and self.instance.embedded_pharmacies.exists():
+            raise serializers.ValidationError({"organization_type": "Remove pharmacy affiliations before changing the facility type."})
         license_number = attrs.get(
             "license_number", getattr(self.instance, "license_number", "")
         ).strip()
@@ -85,10 +98,6 @@ class OrganizationSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"license_number": "This licence number is already registered for this organization type."}
                 )
-        issued = attrs.get("license_issued_on", getattr(self.instance, "license_issued_on", None))
-        expires = attrs.get("license_expires_on", getattr(self.instance, "license_expires_on", None))
-        if issued and expires and expires <= issued:
-            raise serializers.ValidationError({"license_expires_on": "Expiry must be after issue date."})
         attrs["license_number"] = license_number
         return attrs
 
@@ -96,7 +105,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
 class PractitionerCredentialSerializer(serializers.ModelSerializer):
     practitioner_name = serializers.SerializerMethodField()
     verified_by_email = serializers.EmailField(source="verified_by.email", read_only=True)
-    document = serializers.FileField(write_only=True, required=False, allow_null=True, validators=[validate_credential_upload])
+    document = serializers.FileField(write_only=True, required=False, allow_null=True)
     document_url = serializers.SerializerMethodField()
 
     def get_document_url(self, obj):
@@ -104,7 +113,7 @@ class PractitionerCredentialSerializer(serializers.ModelSerializer):
         user = getattr(request, "user", None)
         if not obj.document or not user or not user.is_authenticated:
             return None
-        if not (is_platform_super_admin(user) or can_review_compliance(user)) and obj.practitioner_id != user.id:
+        if user.role != User.Role.ADMIN and obj.practitioner_id != user.id:
             return None
         path = f"/api/registry/credentials/{obj.pk}/document/"
         return request.build_absolute_uri(path) if request else path

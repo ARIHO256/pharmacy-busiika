@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
-from accounts.permissions import IsRole, request_role
+from accounts.permissions import IsRole
 from accounts.roles import CLINICAL_ROLES, PROFESSIONAL_ROLES, portal_path_for_role
 from governance.models import AuditEvent
 from governance.services import audit
@@ -34,6 +34,11 @@ class OrganizationListCreateView(APIView):
     def get(self, request):
         qs = Organization.objects.filter(status=Organization.Status.VERIFIED, active=True).prefetch_related("locations")
         org_type = request.query_params.get("type")
+        parent = request.query_params.get("parent_facility")
+        if parent is not None:
+            if not parent.isdecimal():
+                return Response({"detail": "Supply a valid facility ID."}, status=400)
+            qs = qs.filter(parent_facility_id=parent, parent_facility__active=True, parent_facility__status=Organization.Status.VERIFIED)
         search = request.query_params.get("search")
         if org_type:
             qs = qs.filter(organization_type=org_type)
@@ -45,9 +50,9 @@ class OrganizationListCreateView(APIView):
 
     @transaction.atomic
     def post(self, request):
-        serializer = OrganizationSerializer(data=request.data)
+        serializer = OrganizationSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        status_value = Organization.Status.VERIFIED if request_role(request) == User.Role.ADMIN else Organization.Status.PENDING
+        status_value = Organization.Status.VERIFIED if request.user.role == User.Role.ADMIN else Organization.Status.PENDING
         organization = serializer.save(owner=request.user, status=status_value)
         audit(
             actor=request.user,
@@ -65,7 +70,7 @@ class MyOrganizationListView(APIView):
     allowed_roles = PROVIDER_ROLES + ["admin"]
 
     def get(self, request):
-        qs = Organization.objects.all() if request_role(request) == User.Role.ADMIN else Organization.objects.filter(owner=request.user)
+        qs = Organization.objects.select_related("parent_facility") if request.user.role == User.Role.ADMIN else Organization.objects.filter(owner=request.user)
         return Response(OrganizationSerializer(qs.prefetch_related("locations"), many=True, context={"request": request}).data)
 
 
@@ -81,7 +86,7 @@ class OrganizationDetailView(APIView):
         obj = get_object_or_404(qs, public_id=public_id)
         if request.method == "GET" and obj.status == Organization.Status.VERIFIED and obj.active:
             return obj
-        if request.user.is_authenticated and (request_role(request) == User.Role.ADMIN or obj.owner_id == request.user.id):
+        if request.user.is_authenticated and (request.user.role == User.Role.ADMIN or obj.owner_id == request.user.id):
             return obj
         return None
 
@@ -95,7 +100,7 @@ class OrganizationDetailView(APIView):
         obj = self.get_object(request, public_id)
         if obj is None:
             return Response({"detail": "Organization not found."}, status=404)
-        serializer = OrganizationSerializer(obj, data=request.data, partial=True)
+        serializer = OrganizationSerializer(obj, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
         obj = serializer.save()
         audit(actor=request.user, action="registry.organization.updated", resource=obj, purpose="provider_registry", request=request)
@@ -108,7 +113,7 @@ class OrganizationLocationListCreateView(APIView):
 
     def _organization(self, request, public_id):
         qs = Organization.objects.all()
-        if request_role(request) != User.Role.ADMIN:
+        if request.user.role != User.Role.ADMIN:
             qs = qs.filter(owner=request.user)
         return get_object_or_404(qs, public_id=public_id)
 
@@ -131,16 +136,16 @@ class PractitionerCredentialListCreateView(APIView):
 
     def get(self, request):
         qs = PractitionerCredential.objects.select_related("practitioner", "verified_by")
-        if request_role(request) != User.Role.ADMIN:
+        if request.user.role != User.Role.ADMIN:
             qs = qs.filter(practitioner=request.user)
         practitioner_id = request.query_params.get("practitioner")
-        if request_role(request) == User.Role.ADMIN and practitioner_id:
+        if request.user.role == User.Role.ADMIN and practitioner_id:
             qs = qs.filter(practitioner_id=practitioner_id)
         return Response(PractitionerCredentialSerializer(qs, many=True, context={"request": request}).data)
 
     def post(self, request):
         practitioner = request.user
-        if request_role(request) == User.Role.ADMIN:
+        if request.user.role == User.Role.ADMIN:
             practitioner = get_object_or_404(User, pk=request.data.get("practitioner"), role__in=PROFESSIONAL_ROLES)
         serializer = PractitionerCredentialSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -234,16 +239,16 @@ class PractitionerRoleListCreateView(APIView):
         qs = PractitionerRole.objects.select_related("practitioner", "organization", "location")
         if request.query_params.get("public") == "1":
             qs = qs.filter(active=True, organization__status=Organization.Status.VERIFIED, organization__active=True)
-        elif request_role(request) != User.Role.ADMIN:
+        elif request.user.role != User.Role.ADMIN:
             qs = qs.filter(practitioner=request.user)
         return Response(PractitionerRoleSerializer(qs, many=True).data)
 
     def post(self, request):
         practitioner = request.user
-        if request_role(request) == User.Role.ADMIN:
+        if request.user.role == User.Role.ADMIN:
             practitioner = get_object_or_404(User, pk=request.data.get("practitioner"), role__in=PROFESSIONAL_ROLES)
         organization = get_object_or_404(Organization, pk=request.data.get("organization"))
-        if request_role(request) != User.Role.ADMIN and organization.owner_id not in [request.user.id, None]:
+        if request.user.role != User.Role.ADMIN and organization.owner_id not in [request.user.id, None]:
             return Response({"detail": "An administrator or organization owner must approve this affiliation."}, status=403)
         serializer = PractitionerRoleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -324,7 +329,7 @@ class OrganizationLicenseDocumentView(APIView):
 
     def get(self, request, public_id):
         organization = get_object_or_404(Organization, public_id=public_id)
-        if request_role(request) != User.Role.ADMIN and organization.owner_id != request.user.id:
+        if request.user.role != User.Role.ADMIN and organization.owner_id != request.user.id:
             return Response({"detail": "You are not allowed to view this licence document."}, status=403)
         if not organization.license_document:
             return Response({"detail": "No licence document is available."}, status=404)
@@ -338,7 +343,7 @@ class PractitionerCredentialDocumentView(APIView):
 
     def get(self, request, pk):
         credential = get_object_or_404(PractitionerCredential, pk=pk)
-        if request_role(request) != User.Role.ADMIN and credential.practitioner_id != request.user.id:
+        if request.user.role != User.Role.ADMIN and credential.practitioner_id != request.user.id:
             return Response({"detail": "You are not allowed to view this credential."}, status=403)
         if not credential.document:
             return Response({"detail": "No credential document is available."}, status=404)
@@ -352,11 +357,11 @@ class CareRelationshipListView(APIView):
 
     def get(self, request):
         qs = CareRelationship.objects.select_related("patient", "practitioner", "organization", "appointment")
-        if request_role(request) == User.Role.PATIENT:
+        if request.user.role == User.Role.PATIENT:
             qs = qs.filter(patient=request.user)
-        elif request_role(request) in CLINICAL_ROLES:
+        elif request.user.role in CLINICAL_ROLES:
             qs = qs.filter(practitioner=request.user)
         patient_id = request.query_params.get("patient")
-        if request_role(request) == User.Role.ADMIN and patient_id:
+        if request.user.role == User.Role.ADMIN and patient_id:
             qs = qs.filter(patient_id=patient_id)
         return Response(CareRelationshipSerializer(qs, many=True).data)

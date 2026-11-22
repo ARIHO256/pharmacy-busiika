@@ -5,14 +5,12 @@ from appointments.models import Appointment
 
 from .models import (
     CashierShift,
-    CommissionRule,
     Invoice,
     InvoiceItem,
     PaymentTransaction,
     Payout,
     Receipt,
     Subscription,
-    WalletTransaction,
 )
 
 
@@ -198,7 +196,7 @@ class ReceiptSerializer(serializers.ModelSerializer):
         ]
 
     def get_patient_name(self, obj):
-        return _display_name(obj.payment.invoice.patient)
+        return _display_name(obj.payment.invoice.patient) if obj.payment.invoice.patient_id else "Walk-in customer"
 
     def get_issued_by_name(self, obj):
         return _display_name(obj.issued_by)
@@ -243,111 +241,13 @@ class CashierShiftSerializer(serializers.ModelSerializer):
 
 
 class PayoutSerializer(serializers.ModelSerializer):
-    doctor_name = serializers.SerializerMethodField()
-    processed_by_name = serializers.SerializerMethodField()
-
     class Meta:
         model = Payout
-        fields = [
-            "id",
-            "doctor",
-            "doctor_name",
-            "amount",
-            "status",
-            "method",
-            "account_number",
-            "account_name",
-            "reference",
-            "notes",
-            "processed_by",
-            "processed_by_name",
-            "processed_at",
-            "created_at",
-        ]
-        read_only_fields = ["id", "doctor", "status", "reference", "processed_by", "processed_at", "created_at"]
-
-    def get_doctor_name(self, obj):
-        return _display_name(obj.doctor)
-
-    def get_processed_by_name(self, obj):
-        return _display_name(obj.processed_by)
-
-
-class WalletTransactionSerializer(serializers.ModelSerializer):
-    invoice_number = serializers.CharField(source="invoice.number", read_only=True)
-
-    class Meta:
-        model = WalletTransaction
-        fields = [
-            "id",
-            "direction",
-            "kind",
-            "amount",
-            "invoice",
-            "invoice_number",
-            "reference",
-            "created_at",
-        ]
-        read_only_fields = fields
-
-
-class CommissionRuleSerializer(serializers.ModelSerializer):
-    doctor_name = serializers.SerializerMethodField()
-    organization_name = serializers.CharField(source="organization.legal_name", read_only=True)
-
-    class Meta:
-        model = CommissionRule
-        fields = [
-            "id",
-            "doctor",
-            "doctor_name",
-            "organization",
-            "organization_name",
-            "rate",
-            "active",
-            "created_at",
-        ]
-        read_only_fields = ["id", "created_at"]
-
-    def get_doctor_name(self, obj):
-        return _display_name(obj.doctor)
-
-    def validate(self, attrs):
-        doctor = attrs.get("doctor", getattr(self.instance, "doctor", None))
-        organization = attrs.get("organization", getattr(self.instance, "organization", None))
-        if not doctor and not organization:
-            raise serializers.ValidationError("A commission rule targets a doctor or an organization.")
-        rate = attrs.get("rate", getattr(self.instance, "rate", None))
-        if rate is not None and not (0 <= rate < 1):
-            raise serializers.ValidationError({"rate": "Rate must be between 0 and 1 (exclusive)."})
-        return attrs
+        fields = ["id", "doctor", "amount", "status", "created_at"]
+        read_only_fields = ["id", "doctor", "status", "created_at"]
 
 
 class SubscriptionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subscription
         fields = ["id", "user", "plan", "active", "started_at", "expires_at"]
-
-
-from .models import InvoiceAdjustment, RefundRequest
-
-
-class InvoiceAdjustmentSerializer(serializers.ModelSerializer):
-    requested_by_name = serializers.CharField(source="requested_by.display_name", read_only=True)
-    approved_by_name = serializers.CharField(source="approved_by.display_name", read_only=True)
-
-    class Meta:
-        model = InvoiceAdjustment
-        fields = "__all__"
-        read_only_fields = ["number", "requested_by", "approved_by", "approved_at", "created_at"]
-
-
-class RefundRequestSerializer(serializers.ModelSerializer):
-    requested_by_name = serializers.CharField(source="requested_by.display_name", read_only=True)
-    approved_by_name = serializers.CharField(source="approved_by.display_name", read_only=True)
-    invoice_number = serializers.CharField(source="payment.invoice.number", read_only=True)
-
-    class Meta:
-        model = RefundRequest
-        fields = "__all__"
-        read_only_fields = ["number", "requested_by", "approved_by", "approved_at", "completed_at", "gateway_reference", "error", "created_at"]

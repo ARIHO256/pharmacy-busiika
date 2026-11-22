@@ -3,23 +3,7 @@ import { workforceApi } from '../../api/endpoints'
 import { Alert, Button, Card, Input, Modal, Select, Spinner, Table } from '../../components/ui'
 import { displayDate, getError, statusBadge, useRemote } from '../staff/shared'
 
-const roles = [
-  ['doctor', 'Doctor'], ['clinical_officer', 'Clinical officer'], ['dentist', 'Dentist'],
-  ['medical_director', 'Medical director'], ['nurse', 'Nurse'], ['midwife', 'Midwife'],
-  ['theatre_nurse', 'Theatre nurse'], ['anaesthetist', 'Anaesthetist'],
-  ['radiologist', 'Radiologist'], ['radiographer', 'Radiographer / sonographer'],
-  ['physiotherapist', 'Physiotherapist'], ['nutritionist', 'Nutritionist / dietitian'],
-  ['psychologist', 'Psychologist / counsellor'], ['paramedic', 'Paramedic'],
-  ['ambulance_dispatcher', 'Ambulance dispatcher'], ['receptionist', 'Receptionist'],
-  ['records_officer', 'Medical records officer'], ['cashier', 'Cashier / billing officer'],
-  ['accountant', 'Accountant'], ['finance_manager', 'Finance manager'],
-  ['pharmacist', 'Pharmacist'], ['lab_technician', 'Laboratory professional / phlebotomist'],
-  ['insurance_officer', 'Insurance officer'], ['claims_reviewer', 'Claims reviewer'],
-  ['storekeeper', 'Storekeeper'], ['procurement_officer', 'Procurement officer'],
-  ['facility_manager', 'Facility manager'], ['quality_officer', 'Quality assurance officer'],
-  ['compliance_officer', 'Data protection / compliance officer'], ['hr_officer', 'Human resources officer'],
-  ['it_support', 'IT support officer'],
-]
+const roles=[['doctor','Doctor'],['nurse','Nurse / Midwife'],['receptionist','Receptionist'],['records_officer','Medical records officer'],['cashier','Cashier / Billing'],['pharmacist','Pharmacist'],['lab_technician','Laboratory professional'],['insurance_officer','Insurance officer'],['storekeeper','Storekeeper / Procurement'],['facility_manager','Facility manager']]
 export default function Staff(){
  const staff=useRemote(()=>workforceApi.staff(),[]); const deps=useRemote(()=>workforceApi.departments(),[]); const [open,setOpen]=useState(false); const [error,setError]=useState(''); const [form,setForm]=useState({email:'',phone:'',first_name:'',last_name:'',role:'nurse',job_title:'',employee_number:'',department:''})
  const invite=async(e)=>{e.preventDefault();setError('');try{await workforceApi.inviteStaff({...form,department:form.department||null});setOpen(false);staff.reload()}catch(err){setError(getError(err))}}

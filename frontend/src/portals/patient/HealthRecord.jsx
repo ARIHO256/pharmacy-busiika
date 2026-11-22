@@ -178,7 +178,7 @@ export default function HealthRecord() {
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `healthpilot-patient-summary-${user.id}.json`
+      link.download = `mydoctor-patient-summary-${user.id}.json`
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -237,7 +237,7 @@ export default function HealthRecord() {
               actions={<Button variant="ghost" onClick={() => openRecord('allergy')}>+ Add</Button>}
             >
               {!summary.allergies?.length ? (
-                <EmptyState icon="⚕" title="No structured allergies" description="Add known allergies even when they were reported outside HealthPilot." />
+                <EmptyState icon="⚕" title="No structured allergies" description="Add known allergies even when they were reported outside MyDoctor." />
               ) : (
                 <div className="space-y-3">
                   {summary.allergies.map((item) => (
@@ -359,7 +359,7 @@ export default function HealthRecord() {
       {tab === 'privacy' && (
         <div className="space-y-5">
           <Alert title="Your consent is executable">
-            HealthPilot uses these records in access decisions. Revoking consent stops future non-emergency access, while previous lawful access remains traceable in the audit history.
+            MyDoctor uses these records in access decisions. Revoking consent stops future non-emergency access, while previous lawful access remains traceable in the audit history.
           </Alert>
           <Card title="Consent register" actions={<Button onClick={() => setConsentOpen(true)}>Grant consent</Button>}>
             {!consents.length ? (

@@ -41,12 +41,11 @@ class Organization(models.Model):
         on_delete=models.SET_NULL,
         related_name="owned_health_organizations",
     )
+    parent_facility = models.ForeignKey("self", null=True, blank=True, on_delete=models.PROTECT, related_name="embedded_pharmacies")
     legal_name = models.CharField(max_length=220)
     trading_name = models.CharField(max_length=220, blank=True, default="")
     organization_type = models.CharField(max_length=30, choices=Type.choices)
     license_number = models.CharField(max_length=120, blank=True, default="")
-    license_issued_on = models.DateField(null=True, blank=True)
-    license_expires_on = models.DateField(null=True, blank=True)
     license_document = models.FileField(upload_to="registry/organizations/", null=True, blank=True)
     services_description = models.TextField(blank=True, default="")
     issuing_authority = models.CharField(max_length=180, blank=True, default="")

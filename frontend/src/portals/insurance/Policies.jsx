@@ -1,19 +1,15 @@
 import { useState } from 'react'
+import { useAuth } from '../../auth/AuthContext'
+import client from '../../api/client'
 import { servicesApi } from '../../api/endpoints'
-import { Badge, Button, Card, Input, Modal, Table, Textarea } from '../../components/ui'
-import { errMsg, ErrorNote, LoadingOrError, money, StatusBadge, useApi } from '../pharmacy/shared'
+import { Badge, Button, Card, Input, Modal, Table } from '../../components/ui'
+import { errMsg, ErrorNote, LoadingOrError, money, useApi } from '../pharmacy/shared'
 
-const emptyForm = {
-  name: '', coverage_percent: 80, premium: 0, annual_limit: 0, deductible: 0,
-  copay_percent: 0, copay_fixed: 0, waiting_period_days: 0,
-  requires_preauthorization: false, network_only: false, active: true,
-  description: '', exclusions: '', terms_url: '',
-}
-
-const numeric = ['coverage_percent', 'premium', 'annual_limit', 'deductible', 'copay_percent', 'copay_fixed', 'waiting_period_days']
+const emptyForm = { name: '', coverage_percent: '', premium: '', description: '' }
 
 export default function Policies() {
-  const { data: policies, loading, error, reload } = useApi(() => servicesApi.policies())
+  const { user } = useAuth()
+  const { data: policies, loading, error, reload } = useApi(() => servicesApi.policies({ provider: user.id }))
   const [modal, setModal] = useState(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
@@ -26,25 +22,32 @@ export default function Policies() {
   }
 
   const openEdit = (p) => {
-    setForm({ ...emptyForm, ...p })
+    setForm({
+      name: p.name,
+      coverage_percent: p.coverage_percent,
+      premium: p.premium,
+      description: p.description || '',
+    })
     setSaveError('')
     setModal({ editing: p })
   }
 
-  const set = (key) => (event) => {
-    const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value
-    setForm((current) => ({ ...current, [key]: value }))
-  }
-
-  const save = async (event) => {
-    event.preventDefault()
+  const save = async (e) => {
+    e.preventDefault()
     setSaving(true)
     setSaveError('')
     try {
-      const payload = { ...form }
-      numeric.forEach((key) => { payload[key] = Number(payload[key] || 0) })
-      if (modal.editing) await servicesApi.updatePolicy(modal.editing.id, payload)
-      else await servicesApi.savePolicy(payload)
+      const payload = {
+        name: form.name,
+        coverage_percent: Number(form.coverage_percent || 0),
+        premium: Number(form.premium || 0),
+        description: form.description,
+      }
+      if (modal.editing) {
+        await client.put(`/services/policies/${modal.editing.id}/`, payload)
+      } else {
+        await servicesApi.savePolicy(payload)
+      }
       setModal(null)
       reload()
     } catch (err) {
@@ -54,10 +57,10 @@ export default function Policies() {
     }
   }
 
-  const deactivate = async (policy) => {
-    if (!window.confirm(`Deactivate “${policy.name}”? Existing claims remain available.`)) return
+  const remove = async (p) => {
+    if (!window.confirm(`Delete policy "${p.name}"?`)) return
     try {
-      await servicesApi.updatePolicy(policy.id, { active: false })
+      await client.delete(`/services/policies/${p.id}/`)
       reload()
     } catch (err) {
       alert(errMsg(err))
@@ -66,74 +69,80 @@ export default function Policies() {
 
   return (
     <LoadingOrError loading={loading} error={error}>
-      <div className="space-y-6">
-        <Card
-          title="Insurance products"
-          subtitle="Configure premiums, deductibles, copays, benefit limits and authorization rules."
-          actions={<Button onClick={openAdd}>+ Add policy</Button>}
-        >
-          <Table
-            empty="No insurance policies are configured."
-            columns={[
-              {
-                key: 'name', label: 'Policy', render: (p) => (
-                  <div>
-                    <div className="font-semibold text-slate-800">{p.name}</div>
-                    <div className="text-xs text-slate-500 mt-1 max-w-xs line-clamp-2">{p.description || 'No description'}</div>
-                  </div>
-                ),
-              },
-              { key: 'coverage_percent', label: 'Coverage', render: (p) => <Badge color="blue">{p.coverage_percent}%</Badge> },
-              { key: 'premium', label: 'Premium', render: (p) => money(p.premium) },
-              { key: 'annual_limit', label: 'Annual limit', render: (p) => p.annual_limit ? money(p.annual_limit) : 'Unlimited' },
-              {
-                key: 'cost_share', label: 'Member cost share', render: (p) => (
-                  <div className="text-xs text-slate-600 space-y-1">
-                    <div>Deductible: {money(p.deductible)}</div>
-                    <div>Copay: {p.copay_percent}% + {money(p.copay_fixed)}</div>
-                  </div>
-                ),
-              },
-              { key: 'benefits', label: 'Benefits', render: (p) => <Badge>{p.benefit_rules?.length || 0} rules</Badge> },
-              { key: 'active', label: 'Status', render: (p) => <StatusBadge status={p.active ? 'active' : 'inactive'} /> },
-              {
-                key: 'actions', label: '', render: (p) => (
-                  <div className="flex flex-wrap gap-2 justify-end">
-                    <Button variant="outline" onClick={() => openEdit(p)}>Edit</Button>
-                    {p.active && <Button variant="danger" onClick={() => deactivate(p)}>Deactivate</Button>}
-                  </div>
-                ),
-              },
-            ]}
-            rows={policies || []}
-          />
-        </Card>
-      </div>
+      <Card title="Insurance policies" actions={<Button onClick={openAdd}>+ Add policy</Button>}>
+        <Table
+          empty="No policies yet — add your first one."
+          columns={[
+            { key: 'name', label: 'Name', render: (p) => <span className="font-medium text-slate-800">{p.name}</span> },
+            {
+              key: 'coverage_percent',
+              label: 'Coverage',
+              render: (p) => <Badge color="blue">{p.coverage_percent}%</Badge>,
+            },
+            { key: 'premium', label: 'Premium', render: (p) => money(p.premium) },
+            {
+              key: 'description',
+              label: 'Description',
+              render: (p) => <span className="text-slate-500 line-clamp-1 max-w-xs">{p.description || '—'}</span>,
+            },
+            {
+              key: 'actions',
+              label: '',
+              render: (p) => (
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" onClick={() => openEdit(p)}>
+                    Edit
+                  </Button>
+                  <Button variant="danger" onClick={() => remove(p)}>
+                    Delete
+                  </Button>
+                </div>
+              ),
+            },
+          ]}
+          rows={policies || []}
+        />
+      </Card>
 
-      <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.editing ? 'Edit insurance policy' : 'Create insurance policy'} wide>
-        <form onSubmit={save} className="space-y-5">
+      <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.editing ? 'Edit policy' : 'Add policy'}>
+        <form onSubmit={save} className="space-y-4">
           <ErrorNote error={saveError} />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input label="Policy name" value={form.name} onChange={set('name')} required />
-            <Input label="Monthly premium (UGX)" type="number" min="0" value={form.premium} onChange={set('premium')} required />
-            <Input label="Default coverage (%)" type="number" min="0" max="100" value={form.coverage_percent} onChange={set('coverage_percent')} required />
-            <Input label="Annual benefit limit (UGX, 0 = unlimited)" type="number" min="0" value={form.annual_limit} onChange={set('annual_limit')} />
-            <Input label="Deductible (UGX)" type="number" min="0" value={form.deductible} onChange={set('deductible')} />
-            <Input label="Copay (%)" type="number" min="0" max="100" value={form.copay_percent} onChange={set('copay_percent')} />
-            <Input label="Fixed copay (UGX)" type="number" min="0" value={form.copay_fixed} onChange={set('copay_fixed')} />
-            <Input label="Waiting period (days)" type="number" min="0" value={form.waiting_period_days} onChange={set('waiting_period_days')} />
-            <Input label="Terms URL" type="url" value={form.terms_url} onChange={set('terms_url')} placeholder="https://…" />
+          <Input label="Policy name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Coverage (%)"
+              type="number"
+              min="0"
+              max="100"
+              value={form.coverage_percent}
+              onChange={(e) => setForm({ ...form, coverage_percent: e.target.value })}
+              required
+            />
+            <Input
+              label="Premium (UGX)"
+              type="number"
+              min="0"
+              value={form.premium}
+              onChange={(e) => setForm({ ...form, premium: e.target.value })}
+              required
+            />
           </div>
-          <Textarea label="Description" rows={3} value={form.description} onChange={set('description')} />
-          <Textarea label="Exclusions" rows={3} value={form.exclusions} onChange={set('exclusions')} />
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-xl bg-slate-50 border border-slate-200 p-4">
-            <label className="flex items-center gap-3 text-sm font-medium text-slate-700"><input type="checkbox" checked={form.requires_preauthorization} onChange={set('requires_preauthorization')} /> Preauthorization required</label>
-            <label className="flex items-center gap-3 text-sm font-medium text-slate-700"><input type="checkbox" checked={form.network_only} onChange={set('network_only')} /> Network providers only</label>
-            <label className="flex items-center gap-3 text-sm font-medium text-slate-700"><input type="checkbox" checked={form.active} onChange={set('active')} /> Active product</label>
-          </div>
+          <label className="block">
+            <span className="block text-sm font-medium text-slate-600 mb-1">Description</span>
+            <textarea
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              rows={3}
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+          </label>
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" type="button" onClick={() => setModal(null)}>Cancel</Button>
-            <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save policy'}</Button>
+            <Button variant="outline" type="button" onClick={() => setModal(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Saving…' : modal?.editing ? 'Save changes' : 'Add policy'}
+            </Button>
           </div>
         </form>
       </Modal>

@@ -1,15 +1,37 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
+import MedicineTaxonomyFields from './MedicineTaxonomyFields'
+import { Formulary } from './InventoryWorkflows'
 import client from '../../api/client'
 import { servicesApi } from '../../api/endpoints'
-import { Button, Card, Input, Modal, Table } from '../../components/ui'
+import { Button, Card, Input, Modal, Select, Table } from '../../components/ui'
 import { errMsg, ErrorNote, LoadingOrError, money, useApi } from './shared'
 
-const emptyForm = { name: '', description: '', price: '', stock: '', image: null }
+const saleTypes = {
+  unclassified: 'Unclassified',
+  otc: 'Over the counter',
+  prescription: 'Prescription only',
+  controlled: 'Controlled',
+}
+const emptyForm = { family: '', category: '', taxonomy_node: '', product_attributes: {}, sale_type: 'unclassified', name: '', description: '', price: '', stock: '', image: null }
 
 export default function Inventory() {
+  const [tab, setTab] = useState('inventory')
+  return <div className="space-y-4">
+    <div className="flex flex-wrap gap-2" aria-label="Medicine inventory views">
+      <Button variant={tab === 'inventory' ? 'primary' : 'outline'} aria-pressed={tab === 'inventory'} onClick={() => setTab('inventory')}>Inventory</Button>
+      <Button variant={tab === 'formulary' ? 'primary' : 'outline'} aria-pressed={tab === 'formulary'} onClick={() => setTab('formulary')}>Formulary</Button>
+    </div>
+    {tab === 'inventory' ? <InventoryList /> : <Formulary />}
+  </div>
+}
+
+function InventoryList() {
   const { user } = useAuth()
-  const { data: meds, loading, error, reload } = useApi(() => servicesApi.medicines({ pharmacy: user.id }))
+  const canClassify = user?.role !== 'storekeeper'
+  const { data: meds, loading, error, reload } = useApi(() => servicesApi.medicines())
+  const taxonomy = useApi(() => servicesApi.medicineTaxonomy())
   const [modal, setModal] = useState(null) // {editing?: med}
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
@@ -23,7 +45,7 @@ export default function Inventory() {
   }
 
   const openEdit = (med) => {
-    setForm({ name: med.name, description: med.description || '', price: med.price, stock: med.stock, image: null })
+    setForm({ ...emptyForm, taxonomy_node: med.taxonomy_node || '', product_attributes: med.product_attributes || {}, sale_type: med.sale_type, name: med.name, description: med.description || '', price: med.price, stock: med.stock, image: null })
     setSaveError('')
     setModal({ editing: med })
   }
@@ -34,6 +56,11 @@ export default function Inventory() {
     setSaveError('')
     try {
       const fd = new FormData()
+      if (canClassify) fd.append('sale_type', form.sale_type)
+      if (!taxonomy.error && !taxonomy.loading && taxonomy.data?.length) {
+        fd.append('taxonomy_node', form.taxonomy_node)
+        fd.append('product_attributes', JSON.stringify(form.product_attributes))
+      }
       fd.append('name', form.name)
       fd.append('description', form.description)
       fd.append('price', form.price)
@@ -72,7 +99,10 @@ export default function Inventory() {
 
   return (
     <LoadingOrError loading={loading} error={error}>
-      <Card title="Medicine inventory" actions={<Button onClick={openAdd}>+ Add medicine</Button>}>
+      <Card title="Medicine inventory" actions={<div className="flex flex-wrap items-center gap-3">
+        {user?.role === 'pharmacy' && <Link to="/pharmacy/taxonomy" className="text-sm font-semibold text-primary-700">Manage taxonomy</Link>}
+        <Button onClick={openAdd}>+ Add medicine</Button>
+      </div>}>
         <Table
           empty="No medicines yet — add your first one."
           columns={[
@@ -92,6 +122,9 @@ export default function Inventory() {
               label: 'Description',
               render: (m) => <span className="text-slate-500 line-clamp-1 max-w-xs">{m.description || '—'}</span>,
             },
+            { key: 'taxonomy_node', label: 'Catalogue', render: (medicine) =>
+              taxonomy.data?.find((node) => node.node_id === medicine.taxonomy_node)?.name || '—' },
+            { key: 'sale_type', label: 'Sale classification', render: (m) => saleTypes[m.sale_type] },
             { key: 'price', label: 'Price', render: (m) => money(m.price) },
             {
               key: 'stock',
@@ -123,6 +156,11 @@ export default function Inventory() {
 
       <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.editing ? 'Edit medicine' : 'Add medicine'}>
         <form onSubmit={save} className="space-y-4">
+          {canClassify && <Select label="Sale classification" value={form.sale_type} onChange={(event) => setForm({ ...form, sale_type: event.target.value })}>
+            {Object.entries(saleTypes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </Select>}
+          <MedicineTaxonomyFields catalog={taxonomy} selection={form}
+            setSelection={(selection) => setForm((current) => ({ ...current, ...selection }))} />
           <ErrorNote error={saveError} />
           <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
           <label className="block">

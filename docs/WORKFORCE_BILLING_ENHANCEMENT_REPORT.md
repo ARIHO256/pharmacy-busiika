@@ -1,7 +1,7 @@
-# HealthPilot Workforce, Verification and Billing Enhancement Report
+# MyDoctor Workforce, Verification and Billing Enhancement Report
 
 **Release date:** 4 August 2026  
-**Enhanced source:** `healthpilot(1).zip`  
+**Enhanced source:** `mydoctor(1).zip`  
 **Stack retained:** Django REST Framework, React 18 and Vite
 
 ## Scope of this enhancement

@@ -1,4 +1,4 @@
-# HealthPilot HealthOS — Source Review and Implementation Report
+# MyDoctor HealthOS — Source Review and Implementation Report
 
 **Release date:** 3 August 2026  
 **Source supplied:** `Kimi_Agent_Open-source Telehealth Project.zip`  

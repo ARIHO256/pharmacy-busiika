@@ -84,6 +84,50 @@ class RegistryTests(APITestCase):
         )
         self.assertEqual(relationship.status, "active")
 
+    def test_pharmacy_can_be_standalone_or_affiliated_with_a_clinic_or_hospital(self):
+        from appointments.models import Appointment
+        from prescriptions.models import Prescription
+
+        owner = User.objects.create_user(email="registry-pharmacy@example.com", role="pharmacy", is_verified=True)
+        ProviderProfile.objects.create(user=owner, org_name="Test dispensary", status="verified")
+        pharmacy, _ = Organization.objects.get_or_create(
+            owner=owner, organization_type=Organization.Type.PHARMACY,
+            defaults={"legal_name": "Test dispensary", "status": "verified"},
+        )
+        clinic = Organization.objects.create(legal_name="Test clinic", organization_type="clinic", status="verified")
+        hospital = Organization.objects.create(legal_name="Test hospital", organization_type="hospital", status="verified")
+        appointment = Appointment.objects.create(
+            patient=self.patient, doctor=self.doctor, date=datetime.date(2030, 1, 1),
+            start_time="10:00", end_time="10:30", status="confirmed",
+        )
+        prescription = Prescription.objects.create(appointment=appointment, patient=self.patient, doctor=self.doctor)
+        detail = f"/api/registry/organizations/{pharmacy.public_id}/"
+        send = f"/api/prescriptions/{prescription.pk}/send-to-pharmacy/"
+        self.client.force_authenticate(owner)
+        self.assertEqual(self.client.patch(detail, {"parent_facility": clinic.pk}, format="json").status_code, 400)
+
+        for parent in (None, clinic, hospital):
+            self.client.force_authenticate(self.admin)
+            response = self.client.patch(detail, {"parent_facility": parent.pk if parent else None}, format="json")
+            self.assertEqual(response.status_code, 200, response.data)
+            if parent:
+                listing = self.client.get("/api/registry/organizations/", {"type": "pharmacy", "parent_facility": parent.pk})
+                self.assertEqual([row["id"] for row in listing.data], [pharmacy.pk])
+            directory = self.client.get("/api/services/pharmacies/")
+            row = next(row for row in directory.data if row["id"] == owner.pk)
+            self.assertEqual(row.get("parent_facility_name"), parent.legal_name if parent else None)
+            self.client.force_authenticate(self.patient)
+            routed = self.client.post(send, {"pharmacy_id": owner.pk}, format="json")
+            self.assertIn(routed.status_code, (200, 201), routed.data)
+            self.client.force_authenticate(owner)
+            queue = self.client.get("/api/services/pharmacy-orders/")
+            self.assertEqual([row["id"] for row in queue.data], [routed.data["pharmacy_order_id"]])
+
+        hospital.active = False
+        hospital.save(update_fields=["active"])
+        self.client.force_authenticate(self.patient)
+        self.assertEqual(self.client.post(send, {"pharmacy_id": owner.pk}, format="json").status_code, 409)
+
 
 class ProtectedRegistryDocumentsTests(APITestCase):
     def setUp(self):
@@ -93,8 +137,8 @@ class ProtectedRegistryDocumentsTests(APITestCase):
         from django.test import override_settings
         from django.core.files.uploadedfile import SimpleUploadedFile
 
-        self._media_root = tempfile.mkdtemp(prefix="healthpilot-registry-tests-")
-        self._settings = override_settings(MEDIA_ROOT=self._media_root)
+        self._media_root = tempfile.mkdtemp(prefix="mydoctor-registry-tests-")
+        self._settings = override_settings(MEDIA_ROOT=self._media_root, DEBUG=True)
         self._settings.enable()
         self.addCleanup(self._settings.disable)
         self.addCleanup(shutil.rmtree, self._media_root, True)
@@ -138,8 +182,6 @@ class ProtectedRegistryDocumentsTests(APITestCase):
         )
 
     def test_credential_document_is_owner_or_admin_only(self):
-        from django.urls import Resolver404, resolve
-
         url = f"/api/registry/credentials/{self.credential.id}/document/"
 
         self.client.force_authenticate(self.doctor)
@@ -151,14 +193,11 @@ class ProtectedRegistryDocumentsTests(APITestCase):
         self.client.force_authenticate(self.other_doctor)
         self.assertEqual(self.client.get(url).status_code, 403)
 
-        # Media files are never routed directly; only the permission-checked
-        # endpoint above can stream them.
-        with self.assertRaises(Resolver404):
-            resolve(f"/media/{self.credential.document.name}")
+        self.client.force_authenticate(None)
+        direct_media = self.client.get(f"/media/{self.credential.document.name}")
+        self.assertEqual(direct_media.status_code, 404)
 
     def test_organization_document_is_owner_or_admin_only(self):
-        from django.urls import Resolver404, resolve
-
         url = f"/api/registry/organizations/{self.organization.public_id}/license-document/"
 
         self.client.force_authenticate(self.owner)
@@ -173,10 +212,9 @@ class ProtectedRegistryDocumentsTests(APITestCase):
         self.client.force_authenticate(unrelated)
         self.assertEqual(self.client.get(url).status_code, 403)
 
-        # Media files are never routed directly; only the permission-checked
-        # endpoint above can stream them.
-        with self.assertRaises(Resolver404):
-            resolve(f"/media/{self.organization.license_document.name}")
+        self.client.force_authenticate(None)
+        direct_media = self.client.get(f"/media/{self.organization.license_document.name}")
+        self.assertEqual(direct_media.status_code, 404)
 
     def test_suspension_and_reactivation_update_owner_access(self):
         self.owner.is_verified = True

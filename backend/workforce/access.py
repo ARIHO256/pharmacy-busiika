@@ -1,4 +1,3 @@
-from enterprise.access import active_organization, active_role, is_platform_super_admin
 from registry.models import Organization, PractitionerRole
 
 from .models import StaffMembership
@@ -8,13 +7,10 @@ def organization_for_user(user, organization_id=None):
     """Resolve the organization currently in scope for an authenticated user."""
     if not user or not user.is_authenticated:
         return None
-    if is_platform_super_admin(user):
+    if user.role == "admin":
         if organization_id:
             return Organization.objects.filter(pk=organization_id).first()
-        return active_organization(user)
-    context_org = active_organization(user)
-    if context_org and (not organization_id or str(context_org.pk) == str(organization_id)):
-        return context_org
+        return None
     owned = Organization.objects.filter(owner=user, active=True)
     if organization_id:
         owned = owned.filter(pk=organization_id)
@@ -46,7 +42,7 @@ def membership_for_user(user, organization=None):
 
 
 def user_can_manage_organization(user, organization):
-    if is_platform_super_admin(user):
+    if user.role == "admin":
         return True
     if organization.owner_id == user.id:
         return True

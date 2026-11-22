@@ -52,10 +52,8 @@ class ClinicalEncounter(models.Model):
     def clean(self):
         if self.patient_id and self.patient.role != "patient":
             raise ValidationError({"patient": "Encounter patient must have patient role."})
-        if self.doctor_id:
-            from accounts.roles import BOOKABLE_PROVIDER_ROLES
-            if self.doctor.role not in BOOKABLE_PROVIDER_ROLES:
-                raise ValidationError({"doctor": "Encounter author must be an authorized clinical provider."})
+        if self.doctor_id and self.doctor.role != "doctor":
+            raise ValidationError({"doctor": "Encounter author must have doctor role."})
         if self.appointment_id:
             if self.patient_id and self.appointment.patient_id != self.patient_id:
                 raise ValidationError("Patient does not match appointment.")
@@ -397,12 +395,6 @@ class Referral(models.Model):
     )
     target_specialty = models.CharField(max_length=200)
     target_facility = models.CharField(max_length=250, blank=True, default="")
-    target_provider = models.ForeignKey(
-        AUTH_USER, null=True, blank=True, on_delete=models.SET_NULL, related_name="incoming_referrals"
-    )
-    target_organization = models.ForeignKey(
-        "registry.Organization", null=True, blank=True, on_delete=models.SET_NULL, related_name="referrals"
-    )
     reason = models.TextField()
     clinical_summary = models.TextField(blank=True, default="")
     priority = models.CharField(
@@ -412,40 +404,11 @@ class Referral(models.Model):
         max_length=20, choices=Status.choices, default=Status.SENT
     )
     expires_at = models.DateTimeField(null=True, blank=True)
-    accepted_by = models.ForeignKey(
-        AUTH_USER, null=True, blank=True, on_delete=models.SET_NULL, related_name="accepted_referrals"
-    )
-    accepted_at = models.DateTimeField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-    outcome_summary = models.TextField(blank=True, default="")
-    decline_reason = models.TextField(blank=True, default="")
-    feedback_acknowledged_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["target_provider", "status", "priority"]),
-            models.Index(fields=["referring_provider", "status"]),
-            models.Index(fields=["target_organization", "status"]),
-        ]
-
-
-class ReferralStatusHistory(models.Model):
-    referral = models.ForeignKey(Referral, on_delete=models.CASCADE, related_name="status_history")
-    actor = models.ForeignKey(
-        AUTH_USER, null=True, blank=True, on_delete=models.SET_NULL, related_name="referral_status_actions"
-    )
-    from_status = models.CharField(max_length=20, blank=True, default="")
-    to_status = models.CharField(max_length=20, choices=Referral.Status.choices)
-    reason = models.TextField(blank=True, default="")
-    metadata = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["created_at"]
-        indexes = [models.Index(fields=["referral", "created_at"])]
 
 
 class CarePlan(models.Model):

@@ -10,8 +10,6 @@ export default function DoctorDetail() {
 
   const [doctor, setDoctor] = useState(null)
   const [reviews, setReviews] = useState(null)
-  const [dependents, setDependents] = useState([])
-  const [patientId, setPatientId] = useState('')
   const [error, setError] = useState('')
 
   const [date, setDate] = useState(todayISO())
@@ -26,13 +24,12 @@ export default function DoctorDetail() {
   const [bookError, setBookError] = useState('')
 
   useEffect(() => {
-    Promise.all([authApi.doctor(id), reviewApi.forDoctor(id), authApi.dependents()])
-      .then(([d, r, family]) => {
+    Promise.all([authApi.doctor(id), reviewApi.forDoctor(id)])
+      .then(([d, r]) => {
         setDoctor(d.data)
         setReviews(r.data)
-        setDependents((family.data || []).filter((row) => row.status === 'active' && row.can_book))
       })
-      .catch(() => setError('Could not load this healthcare professional.'))
+      .catch(() => setError('Could not load this doctor.'))
   }, [id])
 
   useEffect(() => {
@@ -56,7 +53,6 @@ export default function DoctorDetail() {
         type,
         reason,
         consent_acknowledged: consentAcknowledged,
-        ...(patientId ? { patient_id: Number(patientId) } : {}),
       })
       navigate('/patient/appointments')
     } catch (err) {
@@ -67,19 +63,19 @@ export default function DoctorDetail() {
   }
 
   if (error) return <Card className="text-sm text-rose-600">{error}</Card>
-  if (!doctor || !reviews) return <Spinner label="Loading professional profile…" />
+  if (!doctor || !reviews) return <Spinner label="Loading doctor profile…" />
 
   return (
     <div className="space-y-6">
       <Link to="/patient/doctors" className="text-sm text-primary-600 hover:underline">
-        ← Back to healthcare professionals
+        ← Back to doctors
       </Link>
 
       <Card>
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h2 className="text-xl font-semibold text-slate-800">
-              {['doctor', 'dentist'].includes(doctor.role) ? 'Dr. ' : ''}{doctor.first_name} {doctor.last_name}
+              Dr. {doctor.first_name} {doctor.last_name}
             </h2>
             <div className="text-primary-600 text-sm mt-1">{doctor.specialization || 'General'}</div>
             <div className="mt-3 text-sm text-slate-500 space-y-1">
@@ -122,7 +118,6 @@ export default function DoctorDetail() {
                     setType('offline')
                     setReason('')
                     setConsentAcknowledged(false)
-                    setPatientId('')
                     setBookError('')
                   }}
                   className="px-3 py-1.5 rounded-lg border border-primary-200 text-primary-700 text-sm hover:bg-primary-600 hover:text-white hover:border-primary-600 transition"
@@ -158,13 +153,9 @@ export default function DoctorDetail() {
         {booking && (
           <div className="space-y-4">
             <p className="text-sm text-slate-600">
-              {['doctor', 'dentist'].includes(doctor.role) ? 'Dr. ' : ''}{doctor.first_name} {doctor.last_name} · {date} · {fmtTime(booking.start)} –{' '}
+              Dr. {doctor.first_name} {doctor.last_name} · {date} · {fmtTime(booking.start)} –{' '}
               {fmtTime(booking.end)}
             </p>
-            <Select label="Patient receiving care" value={patientId} onChange={(e) => setPatientId(e.target.value)}>
-              <option value="">Myself</option>
-              {dependents.map((dependent) => <option key={dependent.id} value={dependent.patient_id}>{dependent.patient_name} · {dependent.relationship.replaceAll('_', ' ')}</option>)}
-            </Select>
             <Select label="Consultation type" value={type} onChange={(e) => setType(e.target.value)}>
               <option value="offline">In person (offline)</option>
               <option value="online">Video call (online)</option>
@@ -187,7 +178,7 @@ export default function DoctorDetail() {
                 className="mt-1 h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
               />
               <span>
-                I confirm that I am authorized to consent for {patientId ? 'the selected dependent' : 'myself'} and allow this healthcare professional to access the minimum health information needed for this {type === 'online' ? 'telemedicine' : 'clinical'} consultation.
+                I consent to this doctor accessing the minimum health information needed for treatment and to a {type === 'online' ? 'telemedicine' : 'clinical'} consultation. I can later review or revoke future access from My Health Record.
               </span>
             </label>
             {bookError && <p className="text-sm text-rose-600">{bookError}</p>}

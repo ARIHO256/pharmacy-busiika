@@ -164,7 +164,7 @@ export default function Prescriptions() {
             <option value="">Select pharmacy…</option>
             {pharmacies.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.org_name}
+                {p.org_name}{p.parent_facility_name ? ` · ${p.parent_facility_name} (${p.parent_facility_type})` : ''}
                 {p.address ? ` — ${p.address}` : ''}
               </option>
             ))}

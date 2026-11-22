@@ -3,7 +3,6 @@ from django.urls import path
 from .views import (
     AppointmentActionView,
     AppointmentListCreateView,
-    AppointmentRescheduleView,
     AvailabilityDetailView,
     AvailabilityListCreateView,
     DoctorSlotsView,
@@ -17,10 +16,6 @@ urlpatterns = [
     # Explicit action routes only. A generic "<str:action>" route here would
     # greedily shadow /prescription/, /review/ and /video-room/ from other
     # apps (this urls.py is included before theirs in config/urls.py).
-    path(
-        "appointments/<int:pk>/reschedule/",
-        AppointmentRescheduleView.as_view(),
-    ),
     path(
         "appointments/<int:pk>/confirm/",
         AppointmentActionView.as_view(action="confirm"),

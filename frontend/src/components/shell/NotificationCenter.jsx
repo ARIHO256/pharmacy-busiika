@@ -29,46 +29,7 @@ export default function NotificationCenter() {
   useEffect(() => {
     load().catch(() => {})
     const interval = window.setInterval(() => load().catch(() => {}), 60000)
-    let socket
-    let reconnect
-    let failures = 0
-    let stopped = false
-    const connect = () => {
-      if (stopped) return
-      const token = localStorage.getItem('access')
-      if (!token) return
-      const apiBase = import.meta.env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:4000/api`
-      const url = new URL(apiBase, window.location.origin)
-      const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-      socket = new WebSocket(`${protocol}//${url.host}/ws/notifications/?token=${encodeURIComponent(token)}`)
-      socket.onopen = () => { failures = 0 }
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          if (message.type === 'notification' && message.notification) {
-            setItems((rows) => [message.notification, ...rows.filter((row) => row.id !== message.notification.id)].slice(0, 25))
-            if (!message.notification.is_read) setUnread((value) => value + 1)
-          }
-        } catch { /* Ignore malformed provider frames. */ }
-      }
-      socket.onclose = (event) => {
-        if (stopped) return
-        // Auth rejections (4401) stop the socket entirely; polling above remains
-        // the fallback channel. Transient closes retry with capped backoff.
-        if (event.code === 4401) return
-        failures += 1
-        if (failures > 6) return
-        const delay = Math.min(5000 * 2 ** (failures - 1), 60000)
-        reconnect = window.setTimeout(connect, delay)
-      }
-    }
-    connect()
-    return () => {
-      stopped = true
-      window.clearInterval(interval)
-      window.clearTimeout(reconnect)
-      if (socket) { socket.onclose = null; socket.close() }
-    }
+    return () => window.clearInterval(interval)
   }, [])
 
   useEffect(() => {

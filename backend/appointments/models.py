@@ -75,14 +75,6 @@ class Appointment(models.Model):
         on_delete=models.CASCADE,
         related_name="doctor_appointments",
     )
-    booked_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="booked_appointments",
-        help_text="Patient or authorized caregiver who created the booking.",
-    )
     date = models.DateField()
     start_time = models.TimeField()
     end_time = models.TimeField()

@@ -16,6 +16,8 @@ export default function Messages() {
   const [error, setError] = useState('')
   const bottomRef = useRef(null)
   const fileRef = useRef(null)
+  const activeId = useRef(null)
+  const pendingMessage = useRef(null)
 
   const loadConversations = useCallback(async () => {
     try {
@@ -33,13 +35,15 @@ export default function Messages() {
   const loadMessages = useCallback(async (conv) => {
     try {
       const { data } = await chatApi.messages(conv.id)
-      setMessages(data)
+      if (activeId.current === conv.id) setMessages(data)
     } catch {
-      setMessages([])
+      if (activeId.current === conv.id) setMessages([])
     }
   }, [])
 
   const openConversation = async (conv) => {
+    activeId.current = conv.id
+    pendingMessage.current = null
     setActive(conv)
     setLoadingThread(true)
     await loadMessages(conv)
@@ -58,6 +62,14 @@ export default function Messages() {
   }, [active, loadMessages, loadConversations])
 
   useEffect(() => {
+    if (!active) return undefined
+    return chatApi.subscribe(active.id, () => {
+      loadMessages(active)
+      loadConversations()
+    })
+  }, [active, loadMessages, loadConversations])
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
@@ -69,8 +81,13 @@ export default function Messages() {
     try {
       const fd = new FormData()
       fd.append('text', text)
+      if (!pendingMessage.current || pendingMessage.current.text !== text || pendingMessage.current.file !== file) {
+        pendingMessage.current = { id: globalThis.crypto?.randomUUID?.(), text, file }
+      }
+      if (pendingMessage.current.id) fd.append('client_id', pendingMessage.current.id)
       if (file) fd.append('attachment', file)
       await chatApi.send(active.id, fd)
+      pendingMessage.current = null
       setText('')
       setFile(null)
       if (fileRef.current) fileRef.current.value = ''

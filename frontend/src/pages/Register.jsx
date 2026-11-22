@@ -13,7 +13,7 @@ const ROLES = [
   { value: 'insurance', label: 'Health Insurance', icon: 'insurance', text: 'Register an insurer to manage policies, eligibility and claims.' },
 ]
 const orgRoles = new Set(['hospital','pharmacy','lab','insurance'])
-const initial = { email:'', password:'', first_name:'', last_name:'', phone:'', role:'patient', location:'', address:'', year_of_completion:'', university:'', cadre:'medical_officer', specialization:'', license_number:'', license_issuer:'', license_issued_on:'', license_expires_on:'', license_document:null, workplace:'', consultation_fee:'', organization_type:'hospital', organization_name:'', district:'', services_description:'' }
+const initial = { email:'', password:'', first_name:'', last_name:'', phone:'', role:'patient', location:'', address:'', year_of_completion:'', university:'', cadre:'medical_officer', specialization:'', license_number:'', license_issuer:'', license_expires_on:'', license_document:null, workplace:'', consultation_fee:'', organization_type:'hospital', organization_name:'', district:'', services_description:'' }
 
 function errorText(err) {
   const data = err.response?.data
@@ -22,10 +22,10 @@ function errorText(err) {
   return Object.entries(data).map(([field, messages]) => `${field.replaceAll('_',' ')}: ${Array.isArray(messages) ? messages.join(' ') : messages}`).join(' · ')
 }
 
-export default function Register() {
+export default function Register({ pharmacyOnly = false }) {
   const { register } = useAuth()
   const navigate = useNavigate()
-  const [form, setForm] = useState(initial)
+  const [form, setForm] = useState(() => pharmacyOnly ? { ...initial, role: 'pharmacy', organization_type: 'pharmacy' } : initial)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const selectedRole = useMemo(() => ROLES.find((role) => role.value === form.role), [form.role])
@@ -43,7 +43,7 @@ export default function Register() {
         if (value !== '' && value !== null && value !== undefined) payload.append(key, value)
       })
       const user = await register(payload)
-      navigate(ROLE_HOME[user.role] || '/patient')
+      navigate(pharmacyOnly ? '/pharmacy/profile' : ROLE_HOME[user.role] || '/patient')
     } catch (err) {
       setError(errorText(err))
     } finally {
@@ -54,11 +54,11 @@ export default function Register() {
   return (
     <main className="healthos-auth-shell register-mode">
       <section className="healthos-auth-story">
-        <Link to="/" className="healthos-auth-brand"><span><HealthIcon name="heart" size={19}/></span><div><strong>HealthPilot</strong><small>Connected Healthcare OS</small></div></Link>
+        <Link to="/" className="healthos-auth-brand"><span><HealthIcon name="heart" size={19}/></span><div><strong>MyDoctor</strong><small>{pharmacyOnly ? 'Pharmacy' : 'Connected Healthcare OS'}</small></div></Link>
         <div className="healthos-auth-copy">
           <span className="healthos-auth-kicker">JOIN THE HEALTH NETWORK</span>
-          <h1>One registration flow.<br/><em>The correct workspace for every role.</em></h1>
-          <p>Patients become active immediately. Doctors and healthcare organizations enter a protected pending-verification state until an administrator validates their licence.</p>
+          <h1>{pharmacyOnly ? 'Register your pharmacy.' : 'One registration flow.'}<br/><em>{pharmacyOnly ? 'Prepare your workspace.' : 'The correct workspace for every role.'}</em></h1>
+          <p>{pharmacyOnly ? 'Submit your pharmacy licence for verification. Invited staff use the link sent by their organization.' : 'Patients become active immediately. Doctors and healthcare organizations enter a protected pending-verification state until an administrator validates their licence.'}</p>
           <div className="healthos-selected-role"><span><HealthIcon name={selectedRole?.icon || 'heart'} size={22}/></span><div><small>Selected workspace</small><strong>{selectedRole?.label}</strong><p>{selectedRole?.text}</p></div></div>
         </div>
         <div className="healthos-auth-trust"><span><HealthIcon name="shield" size={15}/> Private licence documents</span><span><HealthIcon name="lock" size={15}/> Role-scoped access</span></div>
@@ -66,10 +66,10 @@ export default function Register() {
 
       <section className="healthos-auth-form-area register-form-area">
         <div className="healthos-auth-form-card register-card">
-          <div className="healthos-auth-form-head"><span className="healthos-auth-form-icon"><HealthIcon name="user" size={20}/></span><div><small>CREATE ACCOUNT</small><h2>Register your role</h2><p>Facility staff such as nurses, receptionists and cashiers join through a secure organization invitation.</p></div></div>
-          <div className="healthos-role-picker" role="radiogroup" aria-label="Choose account role">
+          <div className="healthos-auth-form-head"><span className="healthos-auth-form-icon"><HealthIcon name="user" size={20}/></span><div><small>CREATE ACCOUNT</small><h2>{pharmacyOnly ? 'Register your pharmacy' : 'Register your role'}</h2><p>{pharmacyOnly ? 'Use the details on your registered pharmacy licence.' : 'Facility staff such as nurses, receptionists and cashiers join through a secure organization invitation.'}</p></div></div>
+          {!pharmacyOnly && <div className="healthos-role-picker" role="radiogroup" aria-label="Choose account role">
             {ROLES.map((role) => <button key={role.value} type="button" className={form.role === role.value ? 'is-selected' : ''} onClick={() => setForm({ ...initial, role: role.value, email: form.email, password: form.password, first_name: form.first_name, last_name: form.last_name, phone: form.phone })} role="radio" aria-checked={form.role === role.value}><HealthIcon name={role.icon} size={18}/><span>{role.label}</span>{form.role === role.value && <HealthIcon name="check" size={15}/>}</button>)}
-          </div>
+          </div>}
           <form onSubmit={submit} className="space-y-4" encType="multipart/form-data">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><Input label={isOrganization ? 'Contact first name' : 'First name'} required value={form.first_name} onChange={set('first_name')}/><Input label={isOrganization ? 'Contact last name' : 'Last name'} required value={form.last_name} onChange={set('last_name')}/></div>
             <Input label="Email address" type="email" required value={form.email} onChange={set('email')} placeholder="name@example.com"/>
@@ -93,7 +93,7 @@ export default function Register() {
               <div><strong className="text-sm text-slate-800">Licensed organization details</strong><p className="text-xs text-slate-500">The organization remains hidden from public listings until approved.</p></div>
               {form.role === 'hospital' && <Select required label="Facility type" value={form.organization_type} onChange={set('organization_type')}><option value="hospital">Hospital</option><option value="clinic">Clinic</option></Select>}
               <Input required label="Registered organization name" value={form.organization_name} onChange={set('organization_name')}/>
-              <div className="grid gap-3 sm:grid-cols-2"><Input required label="Registered licence number" value={form.license_number} onChange={set('license_number')}/><Input required label="Issuing authority" value={form.license_issuer} onChange={set('license_issuer')}/></div><div className="grid gap-3 sm:grid-cols-3"><Input label="Licence issue date" type="date" value={form.license_issued_on} onChange={set('license_issued_on')}/><Input required label="Licence expiry date" type="date" value={form.license_expires_on} onChange={set('license_expires_on')}/><Input required label="District / location" value={form.district} onChange={set('district')}/></div>
+              <div className="grid gap-3 sm:grid-cols-2"><Input required label="Registered licence number" value={form.license_number} onChange={set('license_number')}/><Input required label="District / location" value={form.district} onChange={set('district')}/></div>
               <Textarea required label="Physical address" value={form.address} onChange={set('address')}/>
               <Textarea required label="Description of services offered" value={form.services_description} onChange={set('services_description')}/>
               <Input required label="Registered licence photo or PDF" type="file" accept="image/jpeg,image/png,image/webp,.pdf" onChange={(e) => setForm({ ...form, license_document: e.target.files?.[0] || null })} hint="Stored privately for verification and future AI-assisted pre-screening."/>

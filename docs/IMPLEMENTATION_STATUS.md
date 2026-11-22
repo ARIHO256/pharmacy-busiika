@@ -1,236 +1,94 @@
-# HealthPilot Implementation Status — Full-Scale Release
+# Implementation Status
 
-This document describes what is present in this repository. “Implemented” means the data model, API workflow, role checks and user interface are included. It does **not** mean that a deployment has received regulatory approval or that external providers have been activated with live credentials.
+This document is the source of truth for what the repository actually implements. “Foundation” means the data model and core workflow exist but external production infrastructure or certification is still required.
 
-## 1. Identity, security and professional verification
+The 4 November 2026 operational delivery is detailed in
+[OPERATIONS_IMPLEMENTATION.md](OPERATIONS_IMPLEMENTATION.md), including exact API
+contracts, new portal pages, external-service requirements and remaining clinical
+validation limits. Payments were excluded from that delivery.
 
-| Capability | Status | Included implementation |
+## Implemented and tested
+
+| Area | Status | Notes |
 |---|---|---|
-| Role-aware registration | Implemented | Patient, regulated professional and healthcare-organization registration with role-specific fields |
-| Contact verification | Implemented | Email and phone verification tokens, resend controls and verification state |
-| Password recovery | Implemented | Forgot-password, expiring reset token and password change flows |
-| Multi-factor authentication | Implemented | Email OTP challenge, enable/disable and recovery controls |
-| Session security | Implemented | JWT rotation/blacklisting, active-session review and revocation |
-| Brute-force protection | Implemented | Login-attempt tracking, lockout and security event records |
-| Professional credentialing | Implemented | Cadre, university, completion year, workplace, licence number, issue/expiry dates and protected evidence |
-| Organization credentialing | Implemented | Facility type, registration/licence data, issue/expiry lifecycle and protected evidence |
-| Verification lifecycle | Implemented | Pending, under review, information requested, verified, rejected, suspended, revoked, expired and reactivated states |
-| Expiry enforcement | Implemented | Expired/suspended professionals cannot publish availability or receive bookings |
-| Audit trail | Implemented | Append-only governance and operational audit events |
+| Authentication and role portals | Implemented | JWT access/refresh, rotated refresh tokens, password validation, role routing |
+| Patient and provider profiles | Implemented | Provider profile synchronizes to canonical registry organization |
+| Doctor discovery | Implemented | Verified doctors, search and fee filters |
+| Availability and appointments | Implemented | slot generation, uniqueness constraints, lifecycle validation and history |
+| Care relationship | Implemented | created from a booking and used during clinical access decisions |
+| Chat and consultation room | Implemented MVP | persisted chat and Jitsi room integration; production video governance remains |
+| Clinical encounters | Implemented | draft, final, amended and versioned revision snapshots |
+| Allergies, conditions and medication statements | Implemented | patient-reported versus clinician-verified source is retained |
+| Observations | Implemented | numeric/text values, units and interpretations |
+| Patient summary and timeline | Implemented | consent-aware API and patient/doctor interfaces |
+| Referrals and care plans | Implemented foundation | create/list and longitudinal display; receiving-facility workflow is future work |
+| Consent | Implemented | grant, expiry, recipient, data categories and revocation |
+| Break-glass access | Implemented | 30-minute access, reason, end and compliance review |
+| Governance audit | Implemented | append-only audit events and admin monitoring |
+| Organization registry | Implemented | organizations, locations, public verified directory and admin status controls |
+| Practitioner credential registry | Implemented | submission and administrator verification/rejection/revocation |
+| Practitioner roles | Implemented foundation | organization affiliation and specialty |
+| Prescriptions | Implemented enhanced MVP | version, status, signature time, expiry, item instructions and pharmacy transfer |
+| Pharmacy commerce and stock safety | Implemented operational workflows | medicines, cart, orders, suppliers, prescription orders, batch/expiry/FEFO stock, recall, cold-chain quarantine, witnessed controlled-stock register and prescription quantity checks |
+| Laboratory | Implemented enhanced MVP | catalogue, bookings, structured results, critical flag and acknowledgement |
+| Hospital | Implemented operational workflows | service catalogue, bookings, admissions, transfers, discharge, bed allocation, signed-prescription medication schedules and procedure booking conflicts |
+| Insurance | Implemented operational workflows | policies, coverage, service benefits, preauthorization, annual-limit assessments, immutable decision snapshots and reconciliation totals |
+| Payments | Implemented development flow | mock gateway plus invoice/receipt; production provider adapter required |
+| Accounting ledger | Implemented foundation | immutable journal entries and balanced postings |
+| Transactional outbox | Implemented worker and adapter | event persistence, Celery/Redis configuration, leased publication, signed idempotent webhooks, retries and dead letters; deployment required |
+| Terminology catalogue | Implemented foundation | local concepts and mappings; no external terminology-server integration |
+| FHIR export | Implemented draft | R4-aligned patient-summary collection; not certified or a complete FHIR server |
+| Request tracing | Implemented | validated/generated `X-Request-ID` response header |
+| Health probes | Implemented | `/healthz` and database-aware `/readyz` |
+| API version alias | Implemented | `/api/v1/` mirrors legacy `/api/` |
+| Responsive design system | Implemented | semantic health colours, accessibility focus and reduced-motion rules |
 
-Live email/SMS verification requires provider credentials in the deployment environment.
+| Role-based registration and verification | Implemented | Patients activate immediately; doctors and organizations require mandatory licence evidence and administrator approval |
+| Facility workforce | Implemented enhanced foundation | invitation acceptance, departments, memberships, role routing and suspension/reactivation |
+| Nursing | Implemented outpatient foundation | triage, vitals, nursing notes and medication administration with verification gates |
+| Reception and queue | Implemented | patient search/registration, walk-in check-in, queue states and organization scope |
+| Billing and cashier | Implemented enhanced foundation | itemized invoices, partial payments, receipts, shifts and reconciliation fields |
+| Notification pipeline | Implemented enhanced foundation | role-correct action links, preferences, quiet hours, transactional default channels, delivery jobs, bounded email retries, appointment reminders and credential-expiry reminders; production SMS/push providers remain |
+| Secure verification files | Implemented application control | owner/admin protected endpoints and access audit; production private object storage remains required |
+| Laboratory operations | Implemented enhanced foundation | referrals, specimen lifecycle, result author/validator/release data and patient-release gating |
+| Patient master identity | Implemented controlled linking | person/account links, identifier namespaces, demographic candidates, audited merge/unmerge without rewriting clinical record ownership |
+| Receiving referrals | Implemented | receiving organization, acceptance/decline, assignment, scheduling, versioned transitions and completion outcome |
+| Imaging operations | Implemented integration workflow | orders, scheduling, study UID, clinician reports and DICOMweb metadata adapter; external archive/viewer required |
+| Real-time chat | Implemented | authenticated origin-checked WebSocket refresh, HTTP fallback, incremental synchronization, receipts and idempotent text-message retries |
+| Private documents | Implemented fail-closed workflow | malware scanning, private local/S3 storage, authenticated downloads and 60-second signed access links; scanner/storage provisioning required |
+| Offline capture | Implemented limited facility workflow | encrypted SQLite capture tool and server inbox, idempotent submission, clinician preview/review and application of observations/nursing notes |
+| Research aggregates | Implemented limited analytics | independently approved monthly aggregates of consenting patients, distinct-patient thresholds and small-cell suppression |
+| Administrative copilot governance | Implemented opt-in workflow | evaluated model registry, independently approved allowlisted adapter, administrative drafting and human review; no clinical AI activation by default |
 
-## 2. Roles, permissions and organization workforce
+## Deliberately not claimed as complete
 
-Implemented:
+| Area | Current gap |
+|---|---|
+| National health information exchange | consent-gated summary-delivery adapter exists; national profiles, trust agreement, credentials, conformance tests and certification remain external |
+| Enterprise master patient index | controlled identity links and reversible merges exist; validated probabilistic matching, authoritative identity sources and national ID policies remain |
+| Full hospital EHR | inpatient/procedure workflows now exist; complete ward/anesthesia documentation, clinical protocol validation and a fully validated eMAR remain |
+| Medical imaging | imaging workflow and DICOMweb connector exist; PACS archive, acquisition hardware and diagnostic viewer are not bundled |
+| Production telemedicine | JWT/private-room, recording-consent and quality-event controls exist; private Jitsi service, provider recording enforcement, QoS monitoring and SLA remain |
+| Production payments | no live mobile-money/card credentials, signed webhooks, settlement files or gateway reconciliation |
+| Background jobs | worker/scheduler and Compose definitions exist; broker/workers/monitoring have not been provisioned |
+| Real-time messaging | authenticated service, receipts and incremental sync exist; production Redis/ASGI deployment and legacy-attachment storage migration remain |
+| Pharmacy supply chain | batch, expiry, recall, cold-chain and controlled-stock workflows exist; procurement, maintained formulary, physical reconciliation and professional validation remain |
+| Insurance adjudication | benefit/preauthorization/assessment workflows exist; contracted benefit data, enrollment validation, appeals and settlement integrations remain |
+| Offline-first facility node | encrypted append-only capture/review exists; full offline portal replicas, broader synchronization and deployment validation remain |
+| Clinical terminology server | lookup/expansion adapters exist; maintained terminology services and licensed ICD/SNOMED/LOINC content remain external |
+| Clinical decision support | reviewed versioned rule evaluation exists; a licensed interaction knowledge base, full guideline engine and clinical validation are not included |
+| AI clinical copilot | administrative provider/model governance and draft review exist; diagnostic/treatment AI requires separate clinical safety approval and is not enabled |
+| Research warehouse | consented aggregate snapshots exist; full patient-level de-identification, OMOP warehouse and formal disclosure review remain |
+| Regulatory certification | not certified as medical-device software, HIE participant or production clinical system |
 
-- Primary portal roles for patient, doctor, clinical officer, dentist, medical director, nurse, midwife, theatre nurse, receptionist, records officer, cashier/billing, accountant, finance manager, pharmacist, storekeeper, laboratory professional, radiologist/radiographer, anaesthetist, paramedic, ambulance dispatcher, insurance officer, claims reviewer, facility manager, HR, quality, compliance, procurement and IT-support actors.
-- Configurable organization roles and permissions for site-specific titles such as phlebotomist, sonographer, pharmacy technician, ward manager, infection-control officer and data-protection officer without weakening the primary portal boundary.
-- Organization-scoped `StaffMembership`, departments, invitations, suspension/reactivation and multi-organization membership.
-- Configurable facility roles and permission definitions.
-- Multiple granular role assignments per membership.
-- Branch/department-aware backend authorization.
-- Role-aware portal routing and navigation.
-- Verified multi-cadre professional directory for bookable healthcare providers.
+## Validation evidence in this delivery
 
-The application enforces permissions in Django APIs; frontend route guards are not treated as the security boundary.
+- All backend Python source and migration files pass `python3 -m compileall` syntax compilation.
+- Frontend source is parsed with the locally available TypeScript parser during packaging.
+- A full Django system check, migration execution and automated test suite require installing the Python dependencies from `backend/requirements.txt`.
+- A full Vite build requires successful npm dependency installation. The isolated build environment used for this upgrade could not download one npm tarball from its package mirror, so the final build must be run in the target development environment.
 
-## 3. Patient and caregiver services
+## Appointments and scheduling
 
-Implemented:
-
-- Patient demographic and medical profile.
-- Dependents with independent medical records.
-- Parent, guardian and caregiver authority.
-- Child authority activation and administrator review for adult authority.
-- Separate permissions for booking, medical-record viewing, billing and notifications.
-- Appointment booking for self or an authorized dependent.
-- Patient timeline, allergies, conditions, medication statements, observations, encounters, prescriptions, laboratory results, imaging reports, referrals, admissions, invoices, receipts and insurance pages.
-- Consent grants, expiry and revocation.
-- Time-limited break-glass access with reason and compliance review.
-
-## 4. Scheduling, reception and outpatient care
-
-Implemented:
-
-- Provider discovery by name, cadre, specialty, workplace, fee and availability.
-- Recurring availability, breaks, exceptions and holidays.
-- Atomic slot reservation and conflict protection.
-- Appointment confirmation, rescheduling, cancellation, no-show and completion history.
-- Walk-in patient creation/search, check-in and queue numbers.
-- Role-safe queue transitions.
-- Triage, vital signs and clinician handoff.
-- Structured encounters, signing, immutable revisions and traceable amendments.
-- Diagnoses, care plans, prescriptions, laboratory orders, imaging orders and referrals.
-- Secure patient-professional conversations and consultation-room links.
-
-## 5. Nursing and inpatient operations
-
-Implemented:
-
-- Nursing assessments, progress notes, vitals and medication-administration records.
-- Wards and operational bed catalogue.
-- Admission, admission number, bed allocation and occupancy changes.
-- Transfers between wards/beds with movement history.
-- Ward tasks and clinical rounds.
-- Discharge readiness and discharge summary.
-- Patient-facing admission/discharge history.
-
-## 6. Emergency, ambulance, theatre and maternity
-
-Implemented:
-
-- Emergency/casualty registration, arrival mode, acuity, triage notes, escalation and closure.
-- Ambulance dispatch, crew, pickup, destination and lifecycle actions.
-- Surgical scheduling, surgeon, anaesthetist, theatre, consent, safety checklist, operative and recovery notes.
-- Maternity episode, gestational information, expected delivery date, labour/delivery state, outcome and postnatal notes.
-
-These modules provide operational workflows. Site-specific clinical charts, national reporting forms and device integrations must be configured for each deployment.
-
-## 7. Laboratory and radiology
-
-### Laboratory — implemented
-
-- Test catalogue and configurable multi-test panels.
-- Referring clinician, clinical indication and provisional diagnosis.
-- Specimen type, barcode and custody events.
-- Collection, receipt, processing, rejection and location tracking.
-- Structured results, units, reference ranges, abnormal/critical flags.
-- Validation, release, amendment and critical-result acknowledgement.
-- Patient release gating and separate laboratory staff/organization workspaces.
-
-### Radiology — implemented
-
-- Imaging orders, modality, priority and worklists.
-- Performance state and radiographer assignment.
-- Findings, impression, critical flag, verification and release.
-- Patient and clinician report access.
-
-PACS/DICOM, analyser and laboratory-device interfaces are deployment-specific external integrations.
-
-## 8. Pharmacy, inventory and procurement
-
-Implemented:
-
-- Medication catalogue and electronic prescriptions.
-- Prescription routing to a pharmacy.
-- Review, clarification, partial/complete dispensing and cancellation.
-- Dispensed quantities, batch/expiry evidence, substitution authorization and counselling notes.
-- Inventory items, batches, expiry dates, storage locations and stock movement.
-- Low-stock and expiry scanning tasks.
-- Supplier records and purchase orders with approval and receiving.
-- Stock deduction from recorded dispensing.
-
-Drug-interaction/clinical-decision support requires a licensed medicines knowledge base and is not embedded as unverified medical logic.
-
-## 9. Billing, receipts, payments and finance controls
-
-Implemented:
-
-- Itemized invoices with quantity, unit price, discount, tax and balance.
-- Partial and full payment allocation.
-- Cash, mobile money, card, bank, insurance, Flutterwave and Paystack classifications.
-- Flutterwave and Paystack hosted-checkout adapters.
-- Server-side transaction verification and signed/idempotent webhook processing.
-- Printable and server-generated PDF invoices/receipts.
-- Invoice email delivery.
-- Cashier shifts, expected/declared cash and variance.
-- Adjustment and refund request/approval workflows.
-- Gateway refund adapter calls.
-- Double-entry ledger foundation and immutable postings.
-- Finance dashboards and enterprise summaries.
-
-Live transactions require real gateway accounts, secrets, callback URLs, settlement procedures and acceptance testing. Mock payments are available only for local demonstration and must be disabled in production.
-
-## 10. Insurance administration and adjudication
-
-Implemented:
-
-- Policies with annual limit, deductible, copays, waiting period, exclusions and preauthorization requirement.
-- Configurable service/category benefit rules with limits and overrides.
-- Member enrollment and coverage periods.
-- Eligibility checks with recorded decision snapshots and patient responsibility.
-- Preauthorization submission, review, approval, partial approval, rejection and validity period.
-- Claims with line items, diagnosis/clinical summary, query/review/adjudication lifecycle and patient responsibility.
-- Full and partial approvals.
-- Remittance records and paid-claim lifecycle.
-- Patient, insurer, claims-reviewer and administrator interfaces.
-
-Electronic claims interchange, national coding and insurer-specific settlement files require the selected insurer’s API/contract format.
-
-## 11. Notifications, messaging and reliable events
-
-Implemented:
-
-- In-app, email, SMS, push and WhatsApp channels.
-- Preferences, quiet hours, priority override and device registration.
-- Delivery attempts, retries, provider references and failure details.
-- Appointment, credential, stock, account-security, billing and workflow notifications.
-- Template management and administrator broadcasts.
-- Provider adapters for Africa’s Talking, Twilio, FCM, Meta WhatsApp and generic webhooks.
-- Celery worker/beat configuration.
-- Transactional outbox with HMAC-signed webhook publication, idempotency key, retry and dead-letter state.
-
-Real-time provider delivery depends on deployment credentials and network access.
-
-## 12. Administration, quality and reporting
-
-Implemented:
-
-- User, role and account-state management.
-- Professional and organization verification queues.
-- Protected credential evidence review.
-- Staff, departments, shifts, leave and organization roles.
-- Appointment, finance, refund and adjustment oversight.
-- Support tickets, announcements and notification templates.
-- Subscription plans and account subscriptions.
-- Quality incidents, corrective actions and privacy requests.
-- Emergency, inpatient, theatre, maternity, radiology, inventory and procurement oversight.
-- Enterprise appointment, clinical, workforce, inventory and finance analytics.
-- Audit/compliance workspaces and JSON export.
-
-## 13. Production infrastructure included
-
-- PostgreSQL configuration.
-- Redis and Celery worker/beat services.
-- Gunicorn backend container.
-- Nginx-hosted React build on port 3000 with API proxying.
-- Django API on port 4000.
-- Private S3-compatible object storage configuration, including DigitalOcean Spaces.
-- Health/readiness probes.
-- OpenAPI schema.
-- Dockerfiles, Docker Compose and CI workflow.
-- Large idempotent demonstration seed.
-
-## 14. External and regulatory work that cannot be embedded generically
-
-The following require deployment-specific agreements, credentials, vendors or certification and are therefore configuration/integration work rather than missing generic pages:
-
-- National health-information exchange and identity services.
-- Medical, nursing, allied-health and pharmacy regulator lookup APIs.
-- PACS/DICOM archive and diagnostic viewer.
-- Laboratory analyser interfaces.
-- Licensed drug-interaction and clinical-decision-support content.
-- Insurer-specific claims interchange and settlement files.
-- Fiscal/electronic tax-invoice authority integration.
-- Production payment, SMS, WhatsApp, push, email and storage credentials.
-- Medical-device classification, clinical safety case, privacy impact assessment and regulatory certification.
-
-## 15. Validation evidence and limitation
-
-Passed in the delivery environment:
-
-- Python compilation and AST parsing for all repository backend source files.
-- Local migration dependency-graph validation.
-- JavaScript/JSX parsing with the installed TypeScript parser.
-- Frontend relative-import resolution.
-- JSON manifest and shell-script syntax checks.
-- Release-tree check preventing `NotImplementedError` markers.
-
-Not executed in the delivery environment:
-
-- Django system checks, database migrations and Django tests.
-- Vite production build and browser end-to-end tests.
-- Docker Compose boot test.
-
-Those runtime checks could not run because the environment’s Python/npm package mirrors did not provide the required dependencies and Docker was unavailable. The repository contains CI and Docker workflows that execute those gates in a normal networked development or deployment environment.
+- Explicit consent acknowledgement at appointment booking; the UI and API reject booking until it is accepted.
+- Atomic creation of the appointment, consent grant, care relationship, status history and outbox event.

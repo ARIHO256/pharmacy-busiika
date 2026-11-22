@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ROLE_HOME, useAuth } from '../auth/AuthContext'
-import { enterpriseApi } from '../api/endpoints'
 import './LandingPage.css'
 
 const Icon = ({ name, size = 20 }) => {
@@ -162,7 +161,6 @@ function AccentDots() {
 export default function LandingPage() {
   const { user } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [publicContent, setPublicContent] = useState([])
   const dashboardPath = user ? ROLE_HOME[user.role] || '/patient' : '/login'
 
   useEffect(() => {
@@ -171,22 +169,13 @@ export default function LandingPage() {
     return () => window.removeEventListener('resize', close)
   }, [])
 
-  useEffect(() => {
-    enterpriseApi.publicContent({ locale: 'en-UG' })
-      .then(({ data }) => setPublicContent(Array.isArray(data) ? data : data?.results || []))
-      .catch(() => setPublicContent([]))
-  }, [])
-
-  const heroContent = publicContent.find((entry) => entry.placement === 'home.hero')
-  const promotions = publicContent.filter((entry) => entry.content_type === 'promotion')
-
   return (
     <div className="health-landing flowchart-ui">
       <header className="landing-header">
         <div className="landing-container header-inner">
-          <Link to="/" className="brand-mark" aria-label="HealthPilot home">
+          <Link to="/" className="brand-mark" aria-label="MyDoctor home">
             <span className="brand-symbol"><span /></span>
-            <span><strong>HealthPilot</strong><small>Connected Healthcare OS</small></span>
+            <span><strong>MyDoctor</strong><small>Connected Healthcare OS</small></span>
           </Link>
 
           <nav className="desktop-nav" aria-label="Primary navigation">
@@ -198,7 +187,7 @@ export default function LandingPage() {
           </nav>
 
           <div className="header-actions">
-            <a className="support-link" href="mailto:support@healthpilot.health"><Icon name="phone" size={17}/> Help & Support</a>
+            <a className="support-link" href="mailto:support@mydoctor.health"><Icon name="phone" size={17}/> Help & Support</a>
             <Link className="sign-in-link" to={dashboardPath}>{user ? 'Dashboard' : 'Sign in'}</Link>
             <Link className="header-cta" to={user ? dashboardPath : '/register'}>
               {user ? 'Open platform' : 'Create account'} <Icon name="arrow" size={17}/>
@@ -227,13 +216,13 @@ export default function LandingPage() {
           <div className="hero-grid landing-container">
             <div className="hero-copy">
               <div className="eyebrow"><span /> Patients • Doctors • Pharmacies • Labs • Hospitals • Insurance</div>
-              <h1>{heroContent?.title || <>One health platform.<br/>Every care journey.<br/><em>End-to-end.</em></>}</h1>
+              <h1>One health platform.<br/>Every care journey.<br/><em>End-to-end.</em></h1>
               <p className="hero-description">
-                {heroContent?.summary || 'Modelled directly on your HealthPilot flow architecture, this frontend turns the patient, provider, operations and service ecosystem into one unified digital healthcare experience.'}
+                Modelled directly on your MyDoctor flow architecture, this frontend turns the patient, provider, operations and service ecosystem into one unified digital healthcare experience.
               </p>
               <div className="hero-actions">
                 <Link className="primary-button" to={user ? dashboardPath : '/register'}>
-                  {user ? 'Open dashboard' : 'Start with HealthPilot'} <Icon name="arrow" size={19}/>
+                  {user ? 'Open dashboard' : 'Start with MyDoctor'} <Icon name="arrow" size={19}/>
                 </Link>
                 <a className="secondary-button" href="#patient-flow">View system blueprint <Icon name="arrow" size={19}/></a>
               </div>
@@ -248,7 +237,7 @@ export default function LandingPage() {
               <AccentDots />
               <div className="hero-spotlight" />
               <div className="hero-center-card glass-card">
-                <div className="hero-center-badge">HealthPilot Platform</div>
+                <div className="hero-center-badge">MyDoctor Platform</div>
                 <div className="hero-center-icon"><Icon name="doctor" size={28} /></div>
                 <h3>Clinical, operational and financial coordination</h3>
                 <p>The platform orchestrates scheduling, communication, billing, prescriptions, labs and connected healthcare services.</p>
@@ -289,13 +278,6 @@ export default function LandingPage() {
             ))}
           </div>
         </section>
-
-        {promotions.length > 0 && <section className="section-block section-block-alt" aria-label="Current health promotions">
-          <div className="landing-container">
-            <div className="section-intro compact"><span className="section-kicker">Current programmes</span><h2>Health services configured by the HealthPilot operations team.</h2></div>
-            <div className="service-grid">{promotions.map((entry) => <article key={`${entry.slug}-${entry.version}`} className="service-card accent-cyan"><div className="service-head"><span className="service-icon"><Icon name="bolt" size={18}/></span><h3>{entry.title}</h3></div><p>{entry.summary || entry.body}</p>{entry.target_url && <Link className="secondary-button" to={entry.target_url}>Learn more <Icon name="arrow" size={17}/></Link>}</article>)}</div>
-          </div>
-        </section>}
 
         <section className="section-block" id="patient-flow">
           <div className="landing-container">

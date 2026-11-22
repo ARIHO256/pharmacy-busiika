@@ -2,23 +2,18 @@ import datetime
 import unittest
 
 from django.contrib.auth import get_user_model
-from django.test import override_settings
 from rest_framework.test import APIClient, APITestCase
 
 from .models import (
     CartItem,
     HospitalBooking,
     InsurancePolicy,
-    DispensingRecord,
     LabOrder,
-    LabTestPanel,
-    LabTestPanelItem,
     LabTest,
     Medicine,
     Order,
     PatientCoverage,
     PharmacyOrder,
-    SpecimenEvent,
 )
 
 User = get_user_model()
@@ -52,6 +47,104 @@ class MedicineCrudTests(APITestCase):
         self.other_pharmacy = make_user("ph2@example.com", User.Role.PHARMACY)
         self.patient = make_user("pat@example.com", User.Role.PATIENT)
         self.client = APIClient()
+
+    def test_medicine_taxonomy_is_seeded_and_only_a_subcategory_can_be_assigned(self):
+        self.client.force_authenticate(self.pharmacy)
+        taxonomy = self.client.get(f"{BASE}/medicine-taxonomy/")
+        self.assertEqual(taxonomy.status_code, 200)
+        self.assertEqual(len(taxonomy.data), 43)
+        nodes = {row["node_id"]: row for row in taxonomy.data}
+        leaf = next(row for row in taxonomy.data if row["name"] == "Pain Relievers")
+        category = nodes[leaf["parent"]]
+        self.assertEqual(category["name"], "Over-the-Counter Medications")
+        self.assertEqual(nodes[category["parent"]]["level"], 2)
+        self.assertTrue(leaf["image_url"])
+        payload = {"name": "Catalogue test", "price": 500, "stock": 0}
+        rejected = self.client.post(f"{BASE}/medicines/", {**payload, "taxonomy_node": category["node_id"]})
+        self.assertEqual(rejected.status_code, 400, rejected.data)
+        created = self.client.post(f"{BASE}/medicines/", {**payload, "taxonomy_node": leaf["node_id"]})
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(created.data["taxonomy_node"], leaf["node_id"])
+        cleared = self.client.put(f"{BASE}/medicines/{created.data['id']}/", {"taxonomy_node": ""}, format="multipart")
+        self.assertEqual(cleared.status_code, 200, cleared.data)
+        self.assertIsNone(cleared.data["taxonomy_node"])
+
+    def test_all_subcategories_expose_fields_and_product_values_follow_selected_template(self):
+        import json
+
+        self.client.force_authenticate(self.pharmacy)
+        nodes = self.client.get(f"{BASE}/medicine-taxonomy/").data
+        leaves = [node for node in nodes if node["level"] == 4]
+        self.assertEqual(len(leaves), 37)
+        for node in leaves:
+            keys = [field["key"] for field in node["attribute_fields"]]
+            self.assertTrue(keys, node["name"])
+            self.assertEqual(len(keys), len(set(keys)), node["name"])
+        pain = next(node for node in leaves if node["name"] == "Pain Relievers")
+        meter = next(node for node in leaves if node["name"] == "Glucose Meters")
+        payload = {"name": "Attribute test", "price": 500, "stock": 0, "taxonomy_node": pain["node_id"]}
+        invalid = self.client.post(f"{BASE}/medicines/", {
+            **payload, "product_attributes": {"units_per_pack": 0, "compatible_strips": "Test"},
+        }, format="json")
+        self.assertEqual(invalid.status_code, 400, invalid.data)
+        values = {"dosage_form": "Tablet", "units_per_pack": 10}
+        created = self.client.post(f"{BASE}/medicines/", {
+            **payload, "product_attributes": json.dumps(values),
+        }, format="multipart")
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(created.data["product_attributes"], values)
+        url = f"{BASE}/medicines/{created.data['id']}/"
+        self.assertEqual(self.client.put(url, {"price": 600}).data["product_attributes"], values)
+        changed = self.client.put(url, {
+            "taxonomy_node": meter["node_id"], "product_attributes": {"model": "Sample model"},
+        }, format="json")
+        self.assertEqual(changed.status_code, 200, changed.data)
+        self.assertEqual(changed.data["product_attributes"], {"model": "Sample model"})
+        self.assertEqual(self.client.put(url, {"taxonomy_node": ""}, format="multipart").data["product_attributes"], {})
+
+    def test_custom_taxonomy_is_pharmacy_scoped_and_archive_keeps_existing_assignments(self):
+        from registry.models import Organization
+
+        parent = make_user("hospital@taxonomy.test", User.Role.HOSPITAL)
+        facility = Organization.objects.create(owner=parent, legal_name="Hospital", organization_type="hospital", status="verified")
+        pharmacy = Organization.objects.create(owner=self.pharmacy, legal_name="Ward pharmacy", organization_type="pharmacy",
+                                               status="verified", parent_facility=facility)
+        other = Organization.objects.create(owner=self.other_pharmacy, legal_name="Other pharmacy", organization_type="pharmacy",
+                                             status="verified")
+        manage = f"{BASE}/medicine-taxonomy/manage/"
+        self.client.force_authenticate(parent)
+        response = self.client.get(manage, {"organization": pharmacy.pk})
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(self.client.get(manage, {"organization": other.pk}).status_code, 403)
+        category = next(row for row in response.data["nodes"] if row["name"] == "Over-the-Counter Medications")
+        custom = self.client.post(f"{manage}?organization={pharmacy.pk}", {
+            "name": "Local products", "level": 4, "parent": category["node_id"],
+            "fields": [{"label": "Pack count", "type": "integer"}],
+        }, format="json")
+        self.assertEqual(custom.status_code, 201, custom.data)
+        node_id = custom.data["node_id"]
+        node_url = f"{manage}{node_id}/"
+        self.client.force_authenticate(self.other_pharmacy)
+        self.assertFalse(any(row["node_id"] == node_id for row in self.client.get(f"{BASE}/medicine-taxonomy/").data))
+        payload = {"name": "Custom product", "price": 500, "stock": 0, "taxonomy_node": node_id,
+                   "product_attributes": {"custom_1": 6}}
+        self.assertEqual(self.client.post(f"{BASE}/medicines/", payload, format="json").status_code, 400)
+        self.assertEqual(self.client.patch(node_url, {"name": "Changed"}, format="json").status_code, 404)
+        self.client.force_authenticate(self.pharmacy)
+        created = self.client.post(f"{BASE}/medicines/", payload, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(self.client.patch(node_url, {"name": "New local name"}, format="json").status_code, 200)
+        category_url = f"{manage}{category['node_id']}/"
+        self.assertEqual(self.client.patch(category_url, {"name": "Local OTC", "archived": True}, format="json").status_code, 200)
+        self.assertEqual(self.client.post(f"{BASE}/medicines/", payload, format="json").status_code, 400)
+        existing = self.client.put(f"{BASE}/medicines/{created.data['id']}/", {"price": 600}, format="json")
+        self.assertEqual(existing.status_code, 200, existing.data)
+        self.assertEqual(existing.data["taxonomy_node"], node_id)
+        self.assertEqual(existing.data["product_attributes"], {"custom_1": 6})
+        self.client.force_authenticate(self.other_pharmacy)
+        other_catalogue = {row["node_id"]: row for row in self.client.get(f"{BASE}/medicine-taxonomy/").data}
+        self.assertEqual(other_catalogue[category["node_id"]]["name"], category["name"])
+        self.assertFalse(other_catalogue[category["node_id"]]["archived"])
 
     def test_medicine_crud_by_pharmacy(self):
         self.client.force_authenticate(self.pharmacy)
@@ -94,7 +187,15 @@ class CartCheckoutTests(APITestCase):
     def setUp(self):
         self.pharmacy = make_user("ph@example.com", User.Role.PHARMACY)
         self.patient = make_user("pat@example.com", User.Role.PATIENT)
-        self.med = Medicine.objects.create(pharmacy=self.pharmacy, name="Amoxicillin", price=1000, stock=10)
+        self.med = Medicine.objects.create(pharmacy=self.pharmacy, name="OTC test product", price=1000, stock=10, sale_type="otc")
+        from operations.models import MedicineBatch
+        from registry.models import Organization
+
+        org = Organization.objects.create(owner=self.pharmacy, legal_name="Test shop", organization_type="pharmacy", status="verified")
+        MedicineBatch.objects.create(
+            organization=org, created_by=self.pharmacy, medicine=self.med, batch_number="OTC-1",
+            expires_on=datetime.date.today() + datetime.timedelta(days=30), quantity=10,
+        )
         self.client = APIClient()
         self.client.force_authenticate(self.patient)
 
@@ -105,7 +206,7 @@ class CartCheckoutTests(APITestCase):
 
         r = self.client.get(f"{BASE}/cart/")
         self.assertEqual(len(r.data), 1)
-        self.assertEqual(r.data[0]["medicine"]["name"], "Amoxicillin")
+        self.assertEqual(r.data[0]["medicine"]["name"], self.med.name)
 
         r = self.client.post(f"{BASE}/orders/checkout/", {"delivery": True, "address": "Kampala Rd"})
         self.assertEqual(r.status_code, 201, r.data)
@@ -113,7 +214,7 @@ class CartCheckoutTests(APITestCase):
         order = r.data[0]
         self.assertEqual(order["total"], 3000)
         self.assertEqual(order["status"], "pending")
-        self.assertEqual(order["items"][0]["name"], "Amoxicillin")
+        self.assertEqual(order["items"][0]["name"], self.med.name)
         self.assertEqual(order["items"][0]["qty"], 3)
 
         self.med.refresh_from_db()
@@ -130,33 +231,95 @@ class CartCheckoutTests(APITestCase):
         r = self.client.post(f"{BASE}/orders/{order['id']}/update/", {"status": "bogus"})
         self.assertEqual(r.status_code, 400)
 
+    def test_checkout_rechecks_classification_after_cart_add(self):
+        cart_url = f"{BASE}/cart/"
+        self.assertEqual(self.client.post(cart_url, {"medicine_id": self.med.pk}).status_code, 201)
+        Medicine.objects.filter(pk=self.med.pk).update(sale_type="prescription")
+        self.assertEqual(self.client.post(cart_url, {"medicine_id": self.med.pk}).status_code, 409)
+        self.assertEqual(self.client.post(f"{BASE}/orders/checkout/", {}).status_code, 400)
+        self.assertFalse(Order.objects.exists())
+
+    def test_standalone_pharmacy_records_payment_and_issues_one_receipt(self):
+        from payments.models import Invoice, JournalEntry, PaymentTransaction
+
+        self.client.post(f"{BASE}/cart/", {"medicine_id": self.med.pk, "qty": 2})
+        checkout = self.client.post(f"{BASE}/orders/checkout/", {})
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        order_id = checkout.data[0]["id"]
+        url = f"{BASE}/orders/{order_id}/receipt/"
+        cash = {"method": "cash", "amount": 2000}
+        self.assertEqual(self.client.post(url, cash).status_code, 403)
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+        self.client.force_authenticate(self.pharmacy)
+        for bad in ({"method": "mobile_money", "amount": 2000}, {"method": "cash", "amount": 1000}):
+            self.assertEqual(self.client.post(url, bad).status_code, 400)
+            self.assertFalse(Invoice.objects.exists())
+        receipt = self.client.post(url, cash)
+        self.assertEqual(receipt.status_code, 201, receipt.data)
+        self.assertEqual(receipt.data["organization_name"], "Test shop")
+        self.assertEqual(receipt.data["items"][0]["line_total"], 2000)
+        self.assertEqual(receipt.data["payment"]["method"], "cash")
+
+        retry = self.client.post(url, cash)
+        self.assertEqual(retry.status_code, 200, retry.data)
+        self.assertEqual(retry.data["number"], receipt.data["number"])
+        self.assertEqual(PaymentTransaction.objects.count(), 1)
+        self.assertEqual(self.client.post(url, {"method": "card", "amount": 2000, "reference": "TERM-1"}).status_code, 409)
+        self.assertEqual(self.client.post(f"{BASE}/orders/{order_id}/update/", {"status": "cancelled"}).status_code, 409)
+        entry = JournalEntry.objects.get()
+        self.assertTrue(entry.is_balanced)
+        self.assertEqual({posting.account.owner_id for posting in entry.postings.all()}, {self.pharmacy.pk})
+
+        self.client.force_authenticate(make_user("other-patient@example.com", User.Role.PATIENT))
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.client.force_authenticate(self.patient)
+        self.assertEqual(self.client.get(url).data["number"], receipt.data["number"])
+        self.assertTrue(self.client.get(f"{BASE}/orders/").data[0]["payment_recorded"])
+
+    def test_walk_in_cashier_sale_is_atomic_and_reconciles_shift(self):
+        import uuid
+
+        from operations.models import StockMovement
+        from payments.models import PaymentTransaction
+        from workforce.models import StaffMembership
+
+        till = make_user("till@example.com", User.Role.CASHIER)
+        organization = self.med.batches.get().organization
+        StaffMembership.objects.create(organization=organization, user=till, role="cashier")
+        counter = f"{BASE}/pharmacy/counter-sales/"
+        shifts = f"{BASE}/pharmacy/shifts/"
+        sale = {"request_id": str(uuid.uuid4()), "items": [{"medicine": self.med.pk, "quantity": 2}],
+                "method": "cash", "amount": 2000}
+        self.assertEqual(self.client.post(counter, sale, format="json").status_code, 403)
+        self.client.force_authenticate(till)
+        shift = self.client.post(shifts, {"opening_float": 500}, format="json")
+        self.assertEqual(shift.status_code, 201, shift.data)
+        blocked = Medicine.objects.create(pharmacy=self.pharmacy, name="Restricted", price=500, sale_type="prescription")
+        invalid = {**sale, "amount": 2500, "items": [*sale["items"], {"medicine": blocked.pk, "quantity": 1}]}
+        self.assertEqual(self.client.post(counter, invalid, format="json").status_code, 400)
+        self.assertFalse(Order.objects.exists())
+        result = self.client.post(counter, sale, format="json")
+        self.assertEqual(result.status_code, 201, result.data)
+        self.assertEqual(result.data["receipt"]["patient_name"], "Walk-in customer")
+        self.assertEqual(self.client.post(counter, sale, format="json").data, result.data)
+        order = Order.objects.get(pk=result.data["order_id"])
+        self.assertIsNone(order.patient_id)
+        self.assertEqual(order.status, "delivered")
+        self.assertEqual(PaymentTransaction.objects.count(), 1)
+        self.assertEqual(StockMovement.objects.get(order=order).quantity, -2)
+        self.assertEqual(self.med.batches.get().quantity, 8)
+        closed = self.client.post(f"{shifts}{shift.data['id']}/close/", {"closing_cash": 2400}, format="json")
+        self.assertEqual(closed.status_code, 200, closed.data)
+        self.assertEqual((closed.data["expected_cash"], closed.data["variance"]), (2500, -100))
+        self.assertEqual(self.client.get(f"{BASE}/orders/{order.pk}/receipt/").status_code, 200)
+        self.client.force_authenticate(self.patient)
+        self.assertEqual(self.client.get(f"{BASE}/orders/{order.pk}/receipt/").status_code, 404)
+
     def test_checkout_empty_cart_fails(self):
         r = self.client.post(f"{BASE}/orders/checkout/", {"delivery": False})
         self.assertEqual(r.status_code, 400)
         self.assertIn("detail", r.data)
-
-    @override_settings(PHARMACY_DELIVERY_FEE=1500)
-    def test_checkout_delivery_adds_configured_fee(self):
-        CartItem.objects.create(patient=self.patient, medicine=self.med, qty=3)
-        r = self.client.post(f"{BASE}/orders/checkout/", {"delivery": True, "address": "Kampala Rd"})
-        self.assertEqual(r.status_code, 201, r.data)
-        order = r.data[0]
-        self.assertEqual(order["total"], 4500)
-        self.assertEqual(order["delivery_fee"], 1500)
-
-        # pharmacy can move a delivery order through the new status
-        self.client.force_authenticate(self.pharmacy)
-        r = self.client.post(f"{BASE}/orders/{order['id']}/update/", {"status": "out_for_delivery"})
-        self.assertEqual(r.status_code, 200, r.data)
-        self.assertEqual(Order.objects.get(pk=order["id"]).status, "out_for_delivery")
-
-    @override_settings(PHARMACY_DELIVERY_FEE=1500)
-    def test_checkout_pickup_has_no_delivery_fee(self):
-        CartItem.objects.create(patient=self.patient, medicine=self.med, qty=3)
-        r = self.client.post(f"{BASE}/orders/checkout/", {"delivery": False}, format="json")
-        self.assertEqual(r.status_code, 201, r.data)
-        self.assertEqual(r.data[0]["total"], 3000)
-        self.assertEqual(r.data[0]["delivery_fee"], 0)
 
 
 class LabOrderLifecycleTests(APITestCase):
@@ -177,26 +340,16 @@ class LabOrderLifecycleTests(APITestCase):
         r = self.client.get(f"{BASE}/lab-tests/?lab={self.lab.id}")
         self.assertEqual(len(r.data), 1)
 
-        # patient books; a priced test awaits payment before collection
+        # patient books
         self.client.force_authenticate(self.patient)
         r = self.client.post(f"{BASE}/lab-orders/", {"lab_id": self.lab.id, "test_id": test_id})
         self.assertEqual(r.status_code, 201, r.data)
         order_id = r.data["id"]
-        self.assertEqual(r.data["status"], "awaiting_payment")
+        self.assertEqual(r.data["status"], "booked")
 
         r = self.client.get(f"{BASE}/lab-orders/")
         self.assertEqual(len(r.data), 1)
         self.assertEqual(r.data[0]["test_name"], "CBC")
-
-        # patient pays through the payments API (mock gateway)
-        r = self.client.post(
-            "/api/payments/initiate/",
-            {"lab_order_id": order_id, "method": "mobile_money"},
-        )
-        self.assertEqual(r.status_code, 201, r.data)
-        r = self.client.post(r.data["checkout_url"])
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(LabOrder.objects.get(pk=order_id).status, "ready_for_collection")
 
         # lab manages: move through statuses, attach notes
         self.client.force_authenticate(self.lab)
@@ -234,7 +387,6 @@ class InsuranceTests(APITestCase):
         r = self.client.post(
             f"{BASE}/policies/",
             {"name": "Gold Plan", "coverage_percent": 80, "premium": 50000, "description": "Full cover"},
-            format="json",
         )
         self.assertEqual(r.status_code, 201, r.data)
         policy_id = r.data["id"]
@@ -256,21 +408,13 @@ class InsuranceTests(APITestCase):
         self.assertEqual(len(r.data), 1)
         self.assertEqual(r.data[0]["policy_name"], "Gold Plan")
 
-        # verification is authenticated and audited; anonymous callers are rejected
+        # public verification
         self.client.force_authenticate(None)
         r = self.client.post(f"{BASE}/coverage/verify/", {"member_id": "MEM-001", "provider_id": self.provider.id})
-        self.assertEqual(r.status_code, 401)
-
-        # a patient may verify their own coverage
-        self.client.force_authenticate(self.patient)
-        r = self.client.post(f"{BASE}/coverage/verify/", {"member_id": "MEM-001", "provider_id": self.provider.id})
         self.assertEqual(r.status_code, 200)
-        self.assertTrue(r.data["valid"])
-        self.assertEqual(r.data["policy"], "Gold Plan")
-        self.assertEqual(r.data["coverage_percent"], 80)
+        self.assertEqual(r.data, {"valid": True, "policy": "Gold Plan", "coverage_percent": 80})
         r = self.client.post(f"{BASE}/coverage/verify/", {"member_id": "NOPE", "provider_id": self.provider.id})
-        self.assertEqual(r.status_code, 200)
-        self.assertFalse(r.data["valid"])
+        self.assertEqual(r.data, {"valid": False})
 
     def test_claim_lifecycle(self):
         policy = InsurancePolicy.objects.create(
@@ -441,171 +585,34 @@ class LabResultAccessIsolationTests(APITestCase):
         denied = self.client.get(f"{BASE}/lab-orders/{self.order.id}/results/")
         self.assertEqual(denied.status_code, 403, denied.data)
 
-
-class LabPanelAndSpecimenTests(APITestCase):
-    def setUp(self):
-        self.lab = make_user("panel-lab@example.com", User.Role.LAB, is_verified=True)
-        self.patient = make_user("panel-patient@example.com", User.Role.PATIENT)
-        self.test_a = LabTest.objects.create(lab=self.lab, name="CBC", price=20000, sample_type="EDTA blood")
-        self.test_b = LabTest.objects.create(lab=self.lab, name="Glucose", price=10000, sample_type="Fluoride blood")
+    def test_specimen_recollection_then_critical_result_amendment(self):
+        base = f"{BASE}/lab-orders/{self.order.pk}"
+        self.order.status = LabOrder.Status.SAMPLE_COLLECTED
+        self.order.specimen_id = "SPEC-OLD"
+        self.order.save(update_fields=["status", "specimen_id"])
         self.client.force_authenticate(self.lab)
-
-    def test_panel_order_creates_individual_orders_and_specimen_timeline(self):
-        response = self.client.post(
-            f"{BASE}/lab-panels/",
-            {
-                "name": "Basic wellness",
-                "code": "WELLNESS",
-                "price": 25000,
-                "items": [
-                    {"test": self.test_a.id, "sequence": 1, "required": True},
-                    {"test": self.test_b.id, "sequence": 2, "required": True},
-                ],
-            },
-            format="json",
-        )
-        self.assertEqual(response.status_code, 201, response.data)
-        panel_id = response.data["id"]
-        self.assertEqual(LabTestPanelItem.objects.filter(panel_id=panel_id).count(), 2)
-
-        self.client.force_authenticate(self.patient)
-        response = self.client.post(f"{BASE}/lab-panels/{panel_id}/order/", {}, format="json")
-        self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(len(response.data), 2)
-        order_id = response.data[0]["id"]
-
-        self.client.force_authenticate(self.lab)
-        response = self.client.post(
-            f"{BASE}/lab-orders/{order_id}/specimen-events/",
-            {"event_type": "collected", "location": "Collection room", "notes": "Identity checked."},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 201, response.data)
-        self.assertTrue(response.data["barcode"].startswith("LAB-"))
-        order = LabOrder.objects.get(pk=order_id)
-        self.assertEqual(order.status, LabOrder.Status.SAMPLE_COLLECTED)
-        self.assertEqual(SpecimenEvent.objects.filter(order=order).count(), 1)
-
-
-@unittest.skipUnless(
-    HAS_PRESCRIPTIONS and HAS_APPOINTMENTS,
-    "prescriptions/appointments apps not available in this worktree",
-)
-class ClinicalDispensingTests(APITestCase):
-    def setUp(self):
-        from appointments.models import Appointment
-        from prescriptions.models import Prescription, PrescriptionItem
-
-        self.pharmacy = make_user("dispensing-pharmacy@example.com", User.Role.PHARMACY, is_verified=True)
-        self.patient = make_user("dispensing-patient@example.com", User.Role.PATIENT)
-        self.doctor = make_user("dispensing-doctor@example.com", User.Role.DOCTOR, is_verified=True)
-        self.storekeeper = make_user("dispensing-store@example.com", User.Role.STOREKEEPER, is_verified=True)
-        appointment = Appointment.objects.create(
-            patient=self.patient,
-            doctor=self.doctor,
-            date=datetime.date.today(),
-            start_time=datetime.time(10, 0),
-            end_time=datetime.time(10, 30),
-            type="offline",
-            status="completed",
-        )
-        self.prescription = Prescription.objects.create(
-            appointment=appointment, doctor=self.doctor, patient=self.patient
-        )
-        self.item = PrescriptionItem.objects.create(
-            prescription=self.prescription,
-            medicine_name="Paracetamol",
-            dosage="500 mg",
-            frequency="three times daily",
-            duration="5 days",
-            quantity=15,
-        )
-        self.order = PharmacyOrder.objects.create(
-            pharmacy=self.pharmacy, patient=self.patient, prescription_id=self.prescription.id
-        )
-        Medicine.objects.create(pharmacy=self.pharmacy, name="Paracetamol", price=500, stock=20)
-
-    def test_dispensing_updates_stock_prescription_and_order(self):
-        self.client.force_authenticate(self.pharmacy)
-        response = self.client.post(
-            f"{BASE}/pharmacy-orders/{self.order.id}/dispensing/",
-            {
-                "status": "dispensed",
-                "counselling_notes": "Take after food.",
-                "items": [
-                    {
-                        "prescription_item_id": self.item.id,
-                        "medicine_name": "Paracetamol",
-                        "prescribed_quantity": 15,
-                        "dispensed_quantity": 15,
-                        "batch_number": "PCM-001",
-                        "label_instructions": "One tablet three times daily.",
-                    }
-                ],
-            },
-            format="json",
-        )
-        self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["status"], DispensingRecord.Status.DISPENSED)
-        self.order.refresh_from_db()
-        self.item.refresh_from_db()
-        self.prescription.refresh_from_db()
-        self.assertEqual(self.order.status, PharmacyOrder.Status.DELIVERED)
-        self.assertEqual(self.item.dispensed_quantity, 15)
-        self.assertEqual(self.prescription.status, "dispensed")
-        self.assertEqual(Medicine.objects.get(pharmacy=self.pharmacy, name="Paracetamol").stock, 5)
-
-    def test_storekeeper_cannot_record_clinical_dispensing(self):
-        self.client.force_authenticate(self.storekeeper)
-        response = self.client.post(
-            f"{BASE}/pharmacy-orders/{self.order.id}/dispensing/",
-            {"status": "reviewed", "items": []},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 403)
-
-
-class ProviderDirectoryTests(APITestCase):
-    def setUp(self):
-        from accounts.models import ProviderProfile
-
-        self.client = APIClient()
-        kampala_pharmacy = make_user("kampala-ph@example.com", User.Role.PHARMACY, is_verified=True)
-        ProviderProfile.objects.create(
-            user=kampala_pharmacy,
-            status="verified",
-            org_name="City Care Pharmacy",
-            district="Kampala",
-            address="Plot 12, Kampala Road",
-        )
-        gulu_pharmacy = make_user("gulu-ph@example.com", User.Role.PHARMACY, is_verified=True)
-        ProviderProfile.objects.create(
-            user=gulu_pharmacy,
-            status="verified",
-            org_name="Rural Health Drugs",
-            district="Gulu",
-            address="Gulu Main Street",
-        )
-
-    def test_directory_lists_all_verified_providers_without_filters(self):
-        r = self.client.get(f"{BASE}/pharmacies/")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(len(r.data), 2)
-        self.assertEqual(set(r.data[0]), {"id", "org_name", "address"})
-
-    def test_directory_search_matches_org_name_and_address(self):
-        r = self.client.get(f"{BASE}/pharmacies/?search=city care")
-        self.assertEqual([row["org_name"] for row in r.data], ["City Care Pharmacy"])
-        # Case-insensitive match against the address as well.
-        r = self.client.get(f"{BASE}/pharmacies/?search=GULU MAIN")
-        self.assertEqual([row["org_name"] for row in r.data], ["Rural Health Drugs"])
-        r = self.client.get(f"{BASE}/pharmacies/?search=no-such-provider")
-        self.assertEqual(r.data, [])
-
-    def test_directory_location_filter_matches_district_or_address(self):
-        r = self.client.get(f"{BASE}/pharmacies/?location=kampala")
-        self.assertEqual([row["org_name"] for row in r.data], ["City Care Pharmacy"])
-        r = self.client.get(f"{BASE}/pharmacies/?location=gulu")
-        self.assertEqual([row["org_name"] for row in r.data], ["Rural Health Drugs"])
-        r = self.client.get(f"{BASE}/pharmacies/?location=mbarara")
-        self.assertEqual(r.data, [])
+        reject = self.client.post(f"{base}/update/", {"status": "rejected", "rejection_reason": "Container damaged"})
+        self.assertEqual(reject.status_code, 200, reject.data)
+        result = {"name": "CBC", "value_numeric": "1", "interpretation": "critical", "status": "final"}
+        self.assertEqual(self.client.post(f"{base}/results/", result).status_code, 409)
+        recollect = self.client.post(f"{base}/update/", {"status": "ready_for_collection"})
+        self.assertEqual(recollect.status_code, 200, recollect.data)
+        self.assertEqual(recollect.data["specimen_id"], "")
+        collected = self.client.post(f"{base}/update/", {"status": "sample_collected", "specimen_id": "SPEC-NEW"})
+        self.assertEqual(collected.status_code, 200, collected.data)
+        original = self.client.post(f"{base}/results/", result)
+        self.assertEqual(original.status_code, 201, original.data)
+        amendment = self.client.post(f"{base}/results/", {
+            **result, "status": "amended", "value_numeric": "2", "supersedes": original.data["id"],
+            "amendment_reason": "Verified transcription correction",
+        })
+        self.assertEqual(amendment.status_code, 201, amendment.data)
+        self.client.force_authenticate(self.other_nurse)
+        acknowledge = f"{BASE}/lab-results/{amendment.data['id']}/acknowledge/"
+        self.assertEqual(self.client.post(acknowledge).status_code, 403)
+        self.client.force_authenticate(self.nurse)
+        self.assertEqual(self.client.post(acknowledge).status_code, 200)
+        rows = self.client.get(f"{base}/results/").data
+        self.assertTrue(rows[0]["is_superseded"])
+        self.assertEqual(rows[0]["value_numeric"], "1.0000")
+        self.assertTrue(rows[1]["acknowledged"])

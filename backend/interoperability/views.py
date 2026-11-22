@@ -7,7 +7,6 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.permissions import IsRole
-from accounts.roles import CLINICAL_ROLES
 from clinical.services import resolve_patient_access
 from governance.models import AuditEvent
 from governance.services import audit
@@ -27,7 +26,7 @@ class CapabilityStatementView(APIView):
                 "status": "active",
                 "kind": "instance",
                 "date": timezone.now().date().isoformat(),
-                "publisher": "HealthPilot Platform",
+                "publisher": "MyDoctor Platform",
                 "description": FHIR_FORMAT,
                 "fhirVersion": FHIR_VERSION,
                 "format": ["json"],
@@ -59,7 +58,7 @@ class CapabilityStatementView(APIView):
 
 class PatientSummaryExportView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = ["patient", *sorted(CLINICAL_ROLES), "admin"]
+    allowed_roles = ["patient", "doctor", "admin"]
 
     def get(self, request, patient_id):
         patient = get_object_or_404(User, pk=patient_id, role=User.Role.PATIENT)

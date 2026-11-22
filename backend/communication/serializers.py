@@ -1,7 +1,5 @@
 from rest_framework import serializers
 
-from config.uploads import validate_chat_attachment
-
 from .models import (
     Conversation,
     Message,
@@ -18,7 +16,6 @@ def _display_name(user):
 
 class MessageSerializer(serializers.ModelSerializer):
     sender_name = serializers.SerializerMethodField()
-    attachment = serializers.FileField(required=False, allow_null=True, validators=[validate_chat_attachment])
 
     class Meta:
         model = Message
@@ -31,6 +28,9 @@ class MessageSerializer(serializers.ModelSerializer):
             "attachment",
             "created_at",
             "is_read",
+            "client_id",
+            "delivered_at",
+            "read_at",
         ]
         read_only_fields = ["id", "conversation", "sender", "created_at", "is_read"]
 
@@ -130,19 +130,3 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
         model = NotificationPreference
         exclude = ["user"]
         read_only_fields = ["updated_at"]
-
-
-from .models import DeviceRegistration, NotificationTemplate
-
-
-class DeviceRegistrationSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = DeviceRegistration
-        fields = ["id", "platform", "token", "device_name", "active", "last_seen_at", "created_at"]
-        read_only_fields = ["id", "last_seen_at", "created_at"]
-
-
-class NotificationTemplateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = NotificationTemplate
-        fields = "__all__"

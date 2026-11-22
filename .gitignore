@@ -8,15 +8,17 @@ htmlcov/
 
 # Django/local data
 .env
-.env.compose
 backend/.env
 backend/db.sqlite3
 backend/media/
 backend/staticfiles/
+backend/private-media/
+backend/celerybeat-schedule*
 
 # Node/Vite
 frontend/node_modules/
 frontend/dist/
+frontend/dist-pharmacy/
 frontend/.env
 npm-debug.log*
 

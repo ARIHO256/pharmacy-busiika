@@ -68,7 +68,7 @@ export default function CommandPalette({ open, onClose, nav = [], roleLabel = 'P
         <footer className="command-footer">
           <span><kbd>↑</kbd><kbd>↓</kbd> browse</span>
           <span><kbd>↵</kbd> open</span>
-          <span>HealthPilot HealthOS</span>
+          <span>MyDoctor HealthOS</span>
         </footer>
       </section>
     </div>

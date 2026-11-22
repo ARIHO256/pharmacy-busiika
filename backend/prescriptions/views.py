@@ -1,14 +1,11 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from django.http import HttpResponse
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import IsRole, request_role
-from accounts.roles import DOCTOR_ROLES
-from enterprise.access import active_role
+from accounts.permissions import IsRole
 
 from .models import Prescription
 from .serializers import (
@@ -52,7 +49,7 @@ def _audit(request, action, prescription, metadata=None):
 
 class AppointmentPrescriptionView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = sorted(DOCTOR_ROLES)
+    allowed_roles = ["doctor"]
 
     @transaction.atomic
     def post(self, request, pk):
@@ -60,7 +57,7 @@ class AppointmentPrescriptionView(APIView):
         if appointment is None:
             return Response({"detail": "appointment not found"}, status=404)
         if appointment.doctor_id != request.user.id:
-            return Response({"detail": "not the prescribing clinician for this appointment"}, status=403)
+            return Response({"detail": "not the doctor of this appointment"}, status=403)
         if appointment.status != "confirmed":
             return Response({"detail": "appointment must be confirmed"}, status=400)
 
@@ -116,20 +113,9 @@ class AppointmentPrescriptionView(APIView):
         _safe_notify(
             appointment.patient,
             "New prescription",
-            f"Prescription {prescription.number} was issued by {request.user.display_name}.",
+            f"Prescription {prescription.number} was issued by Dr. {request.user.last_name or request.user.email}.",
             "prescription",
         )
-        try:
-            from workforce.services import advance_active_visit
-
-            advance_active_visit(
-                appointment.patient,
-                "pharmacy",
-                actor=request.user,
-                reason=f"Prescription {prescription.number} issued",
-            )
-        except Exception:
-            pass
         _audit(request, "prescription.issued", prescription)
         try:
             from interoperability.services import emit_event
@@ -156,13 +142,13 @@ class AppointmentPrescriptionView(APIView):
 
 class PrescriptionListView(generics.ListAPIView):
     permission_classes = [IsRole]
-    allowed_roles = ["patient", *sorted(DOCTOR_ROLES)]
+    allowed_roles = ["patient", "doctor"]
     serializer_class = PrescriptionListSerializer
 
     def get_queryset(self):
         user = self.request.user
         qs = Prescription.objects.select_related("doctor", "patient", "encounter").prefetch_related("items")
-        return qs.filter(doctor=user) if active_role(user) in DOCTOR_ROLES else qs.filter(patient=user)
+        return qs.filter(doctor=user) if user.role == "doctor" else qs.filter(patient=user)
 
 
 class PrescriptionDetailView(generics.RetrieveAPIView):
@@ -172,126 +158,21 @@ class PrescriptionDetailView(generics.RetrieveAPIView):
 
     def retrieve(self, request, *args, **kwargs):
         obj = self.get_object()
-        if request.user.id not in (obj.patient_id, obj.doctor_id) and request_role(request) != "admin":
+        if request.user.id not in (obj.patient_id, obj.doctor_id) and request.user.role != "admin":
             return Response({"detail": "not allowed"}, status=403)
         _audit(request, "prescription.viewed", obj)
         return Response(self.get_serializer(obj).data)
 
 
-def _prescription_pdf(prescription):
-    """Generate a server-side PDF of the prescription for printing and pharmacy use."""
-    from io import BytesIO
-    from xml.sax.saxutils import escape
-    from reportlab.lib import colors
-    from reportlab.lib.enums import TA_RIGHT
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import mm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-
-    def safe(value):
-        return escape(str(value or ""))
-
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=18 * mm,
-        leftMargin=18 * mm,
-        topMargin=16 * mm,
-        bottomMargin=16 * mm,
-        title=prescription.number,
-        author="HealthPilot Platform",
-    )
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="RightSmall", parent=styles["BodyText"], alignment=TA_RIGHT, fontSize=8, textColor=colors.HexColor("#64748b")))
-    styles.add(ParagraphStyle(name="DocTitle", parent=styles["Title"], fontSize=22, leading=26, textColor=colors.HexColor("#123b72"), spaceAfter=4))
-    story = []
-    story.append(Table([
-        [Paragraph('<b>HealthPilot Platform</b><br/><font size="9">Connected healthcare services</font>', styles["BodyText"]), Paragraph(f"<b>PRESCRIPTION</b><br/>{safe(prescription.number)}", styles["RightSmall"])],
-    ], colWidths=[120 * mm, 42 * mm], style=[("VALIGN", (0, 0), (-1, -1), "TOP"), ("LINEBELOW", (0, 0), (-1, -1), 1, colors.HexColor("#dbeafe")), ("BOTTOMPADDING", (0, 0), (-1, -1), 10)]))
-    story.append(Spacer(1, 8 * mm))
-    doctor = prescription.doctor
-    profile = getattr(doctor, "doctor_profile", None)
-    cadre = profile.get_cadre_display() if profile and profile.cadre else ""
-    license_number = profile.license_number if profile else ""
-    signed = prescription.signed_at.astimezone().strftime("%d %b %Y %H:%M") if prescription.signed_at else ""
-    expires = prescription.expires_at.astimezone().strftime("%d %b %Y") if prescription.expires_at else ""
-    details = [
-        [Paragraph("<b>Prescriber</b>", styles["BodyText"]), Paragraph("<b>Patient</b>", styles["BodyText"])],
-        [
-            Paragraph(f"{safe(doctor.display_name)}<br/>{safe(cadre)}<br/>License: {safe(license_number or '-')}", styles["BodyText"]),
-            Paragraph(f"{safe(prescription.patient.display_name)}<br/>{safe(prescription.patient.email)}<br/>Signed: {safe(signed)}<br/>Expires: {safe(expires)}", styles["BodyText"]),
-        ],
-    ]
-    story.append(Table(details, colWidths=[88 * mm, 74 * mm], style=[("VALIGN", (0, 0), (-1, -1), "TOP"), ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eff6ff")), ("BOX", (0, 0), (-1, -1), .5, colors.HexColor("#cbd5e1")), ("INNERGRID", (0, 0), (-1, -1), .25, colors.HexColor("#e2e8f0")), ("PADDING", (0, 0), (-1, -1), 7)]))
-    story.append(Spacer(1, 6 * mm))
-    item_rows = [["Medicine", "Dosage", "Frequency", "Route", "Duration", "Qty", "Instructions"]]
-    for item in prescription.items.all():
-        medicine = safe(item.medicine_name)
-        if item.generic_name:
-            medicine += f'<br/><font size="8">{safe(item.generic_name)}</font>'
-        item_rows.append([
-            Paragraph(medicine, styles["BodyText"]),
-            safe(item.dosage),
-            safe(item.frequency),
-            safe(item.route),
-            safe(item.duration),
-            str(item.quantity),
-            Paragraph(safe(item.instructions), styles["BodyText"]),
-        ])
-    items_table = Table(item_rows, colWidths=[34 * mm, 20 * mm, 22 * mm, 16 * mm, 20 * mm, 12 * mm, 38 * mm], repeatRows=1)
-    items_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#123b72")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("GRID", (0, 0), (-1, -1), .35, colors.HexColor("#cbd5e1")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
-        ("PADDING", (0, 0), (-1, -1), 6),
-    ]))
-    story.append(items_table)
-    if prescription.notes:
-        story.append(Spacer(1, 5 * mm))
-        story.append(Paragraph(f"<b>Notes</b><br/>{safe(prescription.notes)}", styles["BodyText"]))
-    story.append(Spacer(1, 10 * mm))
-    story.append(Paragraph("Generated securely by HealthPilot. Dispense only against a verified prescription number. Verification and audit references are retained by the issuing clinician.", styles["RightSmall"]))
-    doc.build(story)
-    return buffer.getvalue()
-
-
-class PrescriptionPDFView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, pk):
-        prescription = (
-            Prescription.objects.select_related("doctor", "patient")
-            .prefetch_related("items")
-            .filter(pk=pk)
-            .first()
-        )
-        if prescription is None:
-            return Response({"detail": "prescription not found"}, status=404)
-        if request.user.id not in (prescription.patient_id, prescription.doctor_id) and request_role(request) != "admin":
-            return Response({"detail": "not allowed"}, status=403)
-        try:
-            payload = _prescription_pdf(prescription)
-        except ImportError:
-            return Response({"detail": "PDF generation dependency is unavailable."}, status=503)
-        _audit(request, "prescription.pdf.generated", prescription)
-        response = HttpResponse(payload, content_type="application/pdf")
-        response["Content-Disposition"] = f'inline; filename="{prescription.number}.pdf"'
-        response["Cache-Control"] = "private, no-store"
-        return response
-
-
 class SendToPharmacyView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = ["patient", *sorted(DOCTOR_ROLES)]
+    allowed_roles = ["patient"]
 
+    @transaction.atomic
     def post(self, request, pk):
-        prescription = Prescription.objects.filter(pk=pk).first()
-        if prescription is None or request.user.id not in (prescription.patient_id, prescription.doctor_id):
+        try:
+            prescription = Prescription.objects.select_for_update().get(pk=pk, patient=request.user)
+        except Prescription.DoesNotExist:
             return Response({"detail": "prescription not found"}, status=404)
         if prescription.status not in [Prescription.Status.ISSUED, Prescription.Status.PARTIALLY_DISPENSED]:
             return Response({"detail": "Prescription cannot be sent in its current state."}, status=409)
@@ -309,19 +190,24 @@ class SendToPharmacyView(APIView):
             ).first()
             if not pharmacy:
                 return Response({"detail": "verified pharmacy not found"}, status=404)
+            from django.db.models import Q
+            from registry.models import Organization
+            organizations = Organization.objects.filter(owner=pharmacy, organization_type=Organization.Type.PHARMACY)
+            if organizations.exists() and not organizations.filter(active=True, status=Organization.Status.VERIFIED).filter(
+                Q(parent_facility__isnull=True) |
+                Q(parent_facility__active=True, parent_facility__status=Organization.Status.VERIFIED)
+            ).exists():
+                return Response({"detail": "This pharmacy is unavailable for prescription routing."}, status=409)
+            if PharmacyOrder.objects.filter(prescription_id=prescription.id, patient=request.user).exclude(
+                status=PharmacyOrder.Status.REJECTED,
+            ).exclude(pharmacy=pharmacy).exists():
+                return Response({"detail": "This prescription already has an active order at another pharmacy."}, status=409)
             order, created = PharmacyOrder.objects.get_or_create(
                 pharmacy=pharmacy,
                 prescription_id=prescription.id,
-                patient=prescription.patient,
+                patient=request.user,
                 defaults={"status": "new"},
             )
-            if created:
-                _safe_notify(
-                    pharmacy,
-                    "New prescription order",
-                    f"Prescription {prescription.number} for {prescription.patient.display_name} was sent to your pharmacy.",
-                    "pharmacy",
-                )
         except Exception:
             return Response({"detail": "pharmacy service unavailable"}, status=503)
         _audit(
@@ -342,7 +228,7 @@ class SendToPharmacyView(APIView):
                     "pharmacy_order_id": order.id,
                 },
                 actor=request.user,
-                patient=prescription.patient,
+                patient=request.user,
                 request=request,
             )
         except Exception:

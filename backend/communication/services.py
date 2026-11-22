@@ -1,7 +1,5 @@
 from django.db import transaction
 
-from enterprise.access import has_role_identity
-
 from .models import Notification, NotificationDelivery, NotificationPreference
 
 
@@ -11,15 +9,10 @@ TRANSACTIONAL_KINDS = {
     "appointment_reminder",
     "clinical",
     "credential_expiry",
-    "hospital",
-    "insurance",
     "lab",
-    "laboratory",
     "payment",
-    "pharmacy",
     "prescription",
     "reminder",
-    "security",
     "verification",
     "workforce",
 }
@@ -41,7 +34,6 @@ def _allowed_channels(user, requested):
         "email": preferences.email_enabled,
         "sms": preferences.sms_enabled,
         "push": preferences.push_enabled,
-        "whatsapp": preferences.whatsapp_enabled,
     }
     return [channel for channel in requested if channel in enabled and enabled[channel]]
 
@@ -79,12 +71,8 @@ def notify(
         recipient = ""
         if channel == NotificationDelivery.Channel.EMAIL:
             recipient = user.email
-        elif channel in {NotificationDelivery.Channel.SMS, NotificationDelivery.Channel.WHATSAPP}:
+        elif channel == NotificationDelivery.Channel.SMS:
             recipient = user.phone
-        elif channel == NotificationDelivery.Channel.PUSH:
-            from .models import DeviceRegistration
-            device = DeviceRegistration.objects.filter(user=user, active=True).order_by("-last_seen_at").first()
-            recipient = device.token if device else ""
         delivery = NotificationDelivery.objects.create(
             notification=notification,
             channel=channel,
@@ -114,7 +102,7 @@ def notify(
                 "channels": selected,
             },
             actor=None,
-            patient=user if has_role_identity(user, "patient") else None,
+            patient=user if user.role == "patient" else None,
         )
     except Exception:
         pass

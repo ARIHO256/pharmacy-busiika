@@ -1,4 +1,5 @@
 from django.db.models import Q
+from django.db import transaction
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -6,8 +7,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
-from accounts.permissions import IsRole, request_role
-from accounts.roles import BOOKABLE_PROVIDER_ROLES, NOTIFICATION_ROLES
+from accounts.permissions import IsRole
+from accounts.roles import NOTIFICATION_ROLES
 
 from .models import Conversation, Message, Notification, NotificationPreference
 from .serializers import (
@@ -20,7 +21,7 @@ from .serializers import (
 
 class ConversationsView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = ["patient", *sorted(BOOKABLE_PROVIDER_ROLES)]
+    allowed_roles = ["patient", "doctor"]
 
     def get(self, request):
         conversations = Conversation.objects.filter(
@@ -32,13 +33,13 @@ class ConversationsView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        if request_role(request) == "patient":
+        if request.user.role == "patient":
             doctor_id = request.data.get("doctor_id")
             if not doctor_id:
                 return Response({"detail": "doctor_id is required"}, status=400)
-            doctor = User.objects.filter(id=doctor_id, role__in=BOOKABLE_PROVIDER_ROLES, is_verified=True, is_active=True).first()
+            doctor = User.objects.filter(id=doctor_id, role="doctor").first()
             if doctor is None:
-                return Response({"detail": "Verified healthcare professional not found"}, status=404)
+                return Response({"detail": "Doctor not found"}, status=404)
             patient = request.user
         else:
             patient_id = request.data.get("patient_id")
@@ -68,7 +69,7 @@ class ConversationsView(APIView):
 
 class MessagesView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = ["patient", *sorted(BOOKABLE_PROVIDER_ROLES)]
+    allowed_roles = ["patient", "doctor"]
 
     def _get_conversation(self, request, pk):
         conversation = Conversation.objects.filter(pk=pk).first()
@@ -84,18 +85,35 @@ class MessagesView(APIView):
             return error
         messages = conversation.messages.select_related("sender")
         # mark incoming messages read for the requester
-        messages.filter(is_read=False).exclude(sender=request.user).update(is_read=True)
+        changed = messages.filter(is_read=False).exclude(sender=request.user).update(is_read=True)
+        messages.filter(read_at__isnull=True).exclude(sender=request.user).update(read_at=timezone.now(), delivered_at=timezone.now())
+        if changed:
+            from .realtime import broadcast
+            broadcast(conversation.pk, "message.receipt")
         serializer = MessageSerializer(
             messages, many=True, context={"request": request}
         )
         return Response(serializer.data)
 
+    @transaction.atomic
     def post(self, request, pk):
         conversation, error = self._get_conversation(request, pk)
         if error:
             return error
         text = request.data.get("text", "") or ""
         attachment = request.FILES.get("attachment")
+        if len(text) > 20000:
+            return Response({"detail": "Message exceeds the size limit."}, status=400)
+        client_id = request.data.get("client_id") or None
+        if client_id:
+            from rest_framework import serializers
+            client_id = serializers.UUIDField().run_validation(client_id)
+            Conversation.objects.select_for_update().get(pk=conversation.pk)
+            previous = Message.objects.filter(conversation=conversation, sender=request.user, client_id=client_id).first()
+            if previous:
+                if previous.text != text:
+                    return Response({"detail": "Message ID was reused for different text."}, status=409)
+                return Response(MessageSerializer(previous, context={"request": request}).data)
         if not text.strip() and attachment is None:
             return Response(
                 {"detail": "text or attachment is required"}, status=400
@@ -105,7 +123,10 @@ class MessagesView(APIView):
             sender=request.user,
             text=text,
             attachment=attachment,
+            client_id=client_id,
         )
+        from .realtime import broadcast
+        broadcast(conversation.pk, "message.created", message.pk)
         serializer = MessageSerializer(message, context={"request": request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -183,173 +204,38 @@ class NotificationPreferencesView(APIView):
 
 class VideoRoomView(APIView):
     permission_classes = [IsRole]
-    allowed_roles = ["patient", *sorted(BOOKABLE_PROVIDER_ROLES)]
+    allowed_roles = ["patient", "doctor"]
 
     def get(self, request, pk):
-        from appointments.models import Appointment
-
-        appointment = Appointment.objects.filter(pk=pk).first()
-        if appointment is None:
-            return Response({"detail": "Appointment not found"}, status=404)
-        participant = request.user in (appointment.patient, appointment.doctor)
-        if not participant and request_role(request) == "patient":
-            from accounts.models import PatientRelationship
-            from django.db.models import Q
-            participant = PatientRelationship.objects.filter(
-                caregiver=request.user, patient=appointment.patient,
-                status=PatientRelationship.Status.ACTIVE, can_book=True,
-            ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())).exists()
-        if not participant:
-            return Response({"detail": "Not a participant"}, status=403)
-        if appointment.status != "confirmed":
-            return Response(
-                {"detail": "Appointment is not confirmed"}, status=400
-            )
-        mode = request.query_params.get("mode") or request.data.get("mode") or "video"
-        if mode not in ("video", "audio"):
-            return Response({"detail": "mode must be one of video, audio"}, status=400)
-        try:
-            from enterprise.services import create_telemedicine_session
-            from enterprise.serializers import TelemedicineSessionSerializer
-            session = create_telemedicine_session(
-                appointment, request.query_params.get("provider") or None, mode=mode
-            )
-            is_host = request.user.id == appointment.doctor_id
-            payload = TelemedicineSessionSerializer(session).data
-            payload.update({
-                "room": session.external_id,
-                "url": session.host_url if is_host else session.join_url,
-                "websocket_url": f"/ws/telemedicine/{session.public_id}/",
-                "is_host": is_host,
-                "recording_consent_required": session.recording_consent_required,
-            })
-            return Response(payload)
-        except Exception as exc:
-            return Response({"detail": f"Telemedicine session could not be created: {exc}"}, status=503)
+        from operations.integration_views import video_join
+        return Response(video_join(request.user, pk))
 
 
-class DeviceRegistrationView(APIView):
-    def get(self, request):
-        from .models import DeviceRegistration
-        from .serializers import DeviceRegistrationSerializer
-        return Response(DeviceRegistrationSerializer(DeviceRegistration.objects.filter(user=request.user), many=True).data)
+class MessageSyncView(MessagesView):
+    def get(self, request, pk):
+        from rest_framework import serializers
+        conversation, error = self._get_conversation(request, pk)
+        if error:
+            return error
+        after = serializers.IntegerField(min_value=0).run_validation(request.query_params.get("after", 0))
+        rows = list(conversation.messages.filter(pk__gt=after).select_related("sender").order_by("id")[:201])
+        page = rows[:200]
+        return Response({"results": MessageSerializer(page, many=True, context={"request": request}).data,
+                         "cursor": page[-1].pk if page else after, "has_more": len(rows) > 200})
 
-    def post(self, request):
-        from .models import DeviceRegistration
-        from .serializers import DeviceRegistrationSerializer
-        serializer = DeviceRegistrationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        row, _ = DeviceRegistration.objects.update_or_create(
-            token=serializer.validated_data["token"],
-            defaults={
-                "user": request.user,
-                "platform": serializer.validated_data["platform"],
-                "device_name": serializer.validated_data.get("device_name", ""),
-                "active": True,
-            },
-        )
-        return Response(DeviceRegistrationSerializer(row).data, status=201)
+    def post(self, request, pk):
+        from rest_framework import serializers
+        from .realtime import broadcast
+        conversation, error = self._get_conversation(request, pk)
+        if error:
+            return error
+        through_id = serializers.IntegerField(min_value=1).run_validation(request.data.get("through_id"))
+        phase = serializers.ChoiceField(choices=["delivered", "read"]).run_validation(request.data.get("phase"))
+        now = timezone.now()
+        rows = conversation.messages.filter(pk__lte=through_id).exclude(sender=request.user)
+        rows.filter(delivered_at__isnull=True).update(delivered_at=now)
+        if phase == "read":
+            rows.filter(read_at__isnull=True).update(is_read=True, read_at=now)
+        broadcast(conversation.pk, "message.receipt", through_id)
+        return Response({"acknowledged": True})
 
-    def delete(self, request, pk):
-        from .models import DeviceRegistration
-        row = get_object_or_404(DeviceRegistration, pk=pk, user=request.user)
-        row.active = False
-        row.save(update_fields=["active"])
-        return Response(status=204)
-
-
-class NotificationTemplateAdminView(APIView):
-    def get(self, request, pk=None):
-        from .models import NotificationTemplate
-        from .serializers import NotificationTemplateSerializer
-        if request_role(request) != "admin":
-            return Response({"detail": "Administrator access required."}, status=403)
-        if pk:
-            return Response(NotificationTemplateSerializer(get_object_or_404(NotificationTemplate, pk=pk)).data)
-        return Response(NotificationTemplateSerializer(NotificationTemplate.objects.all(), many=True).data)
-
-    def post(self, request, pk=None):
-        from .models import NotificationTemplate
-        from .serializers import NotificationTemplateSerializer
-        if request_role(request) != "admin":
-            return Response({"detail": "Administrator access required."}, status=403)
-        instance = get_object_or_404(NotificationTemplate, pk=pk) if pk else None
-        serializer = NotificationTemplateSerializer(instance, data=request.data, partial=bool(instance))
-        serializer.is_valid(raise_exception=True)
-        row = serializer.save()
-        return Response(NotificationTemplateSerializer(row).data, status=200 if instance else 201)
-
-
-class NotificationBroadcastView(APIView):
-    def post(self, request):
-        from accounts.models import User
-        from registry.models import Organization
-        from workforce.models import StaffMembership
-        from .services import notify
-        if request_role(request) != "admin":
-            return Response({"detail": "Administrator access required."}, status=403)
-        title = str(request.data.get("title", "")).strip()
-        body = str(request.data.get("body", "")).strip()
-        if not title or not body:
-            return Response({"detail": "title and body are required."}, status=400)
-        users = User.objects.filter(is_active=True)
-        role = request.data.get("role")
-        if role:
-            users = users.filter(role=role)
-        organization_id = request.data.get("organization_id")
-        if organization_id:
-            member_ids = StaffMembership.objects.filter(organization_id=organization_id, status="active").values_list("user_id", flat=True)
-            organization = Organization.objects.filter(pk=organization_id).first()
-            owner_id = organization.owner_id if organization else None
-            users = users.filter(Q(id__in=member_ids) | Q(id=owner_id))
-        user_ids = request.data.get("user_ids") or []
-        if user_ids:
-            users = users.filter(id__in=user_ids)
-        count = 0
-        for user in users.iterator():
-            notify(
-                user,
-                title,
-                body,
-                kind=request.data.get("kind", "announcement"),
-                priority=request.data.get("priority", "normal"),
-                action_url=request.data.get("action_url", ""),
-                channels=request.data.get("channels") or None,
-                metadata={"broadcast": True, "created_by": request.user.id},
-            )
-            count += 1
-        return Response({"queued": count}, status=201)
-
-
-class NotificationDeliveryCallbackView(APIView):
-    permission_classes = []
-    authentication_classes = []
-
-    def post(self, request, channel):
-        import secrets
-        from django.conf import settings
-        from .models import NotificationDelivery
-        configured = getattr(settings, "NOTIFICATION_CALLBACK_SECRET", "")
-        supplied = request.headers.get("X-Notification-Secret", "")
-        if not configured or not secrets.compare_digest(configured, supplied):
-            return Response({"detail": "Invalid callback signature."}, status=403)
-        reference = str(request.data.get("provider_reference", ""))
-        delivery = NotificationDelivery.objects.filter(provider_reference=reference, channel=channel).first()
-        if not delivery:
-            return Response({"detail": "Delivery not found."}, status=404)
-        incoming = str(request.data.get("status", "")).lower()
-        mapped = {
-            "delivered": NotificationDelivery.Status.DELIVERED,
-            "sent": NotificationDelivery.Status.SENT,
-            "failed": NotificationDelivery.Status.FAILED,
-            "rejected": NotificationDelivery.Status.FAILED,
-        }.get(incoming)
-        if not mapped:
-            return Response({"detail": "Unsupported delivery status."}, status=400)
-        delivery.status = mapped
-        if mapped == NotificationDelivery.Status.DELIVERED:
-            delivery.sent_at = delivery.sent_at or timezone.now()
-        if mapped == NotificationDelivery.Status.FAILED:
-            delivery.last_error = str(request.data.get("error", "Provider rejected delivery"))
-        delivery.save(update_fields=["status", "sent_at", "last_error"])
-        return Response({"updated": True})

@@ -1,6 +1,6 @@
 import datetime
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from accounts.models import User
@@ -12,16 +12,16 @@ from .services import notify
 PASSWORD = "testpass123"
 
 
-def make_user(email, role, first="First", last="Last", **kw):
+def make_user(email, role, first="First", last="Last"):
     return User.objects.create_user(
-        email=email, password=PASSWORD, role=role, first_name=first, last_name=last, **kw
+        email=email, password=PASSWORD, role=role, first_name=first, last_name=last
     )
 
 
 class CommunicationApiTests(TestCase):
     def setUp(self):
         self.patient = make_user("patient@example.com", "patient", "Pat", "One")
-        self.doctor = make_user("doctor@example.com", "doctor", "Doc", "Two", is_verified=True)
+        self.doctor = make_user("doctor@example.com", "doctor", "Doc", "Two")
         self.other = make_user("other@example.com", "patient", "Oth", "Er")
         self.client = APIClient()
 
@@ -97,7 +97,10 @@ class CommunicationApiTests(TestCase):
             Notification.objects.get(id=notification_id).is_read
         )
 
+    @override_settings(DEBUG=True)
     def test_video_room_requires_confirmed_and_participant(self):
+        self.doctor.is_verified = True
+        self.doctor.save(update_fields=["is_verified"])
         appointment = Appointment.objects.create(
             patient=self.patient,
             doctor=self.doctor,
@@ -110,10 +113,11 @@ class CommunicationApiTests(TestCase):
         response = self.client.get(
             f"/api/appointments/{appointment.id}/video-room/"
         )
-        self.assertEqual(response.status_code, 200, response.data)
-        room = response.data["room"]
-        self.assertTrue(room.startswith("healthpilot-"))
-        self.assertEqual(response.data["url"], f"https://meet.jit.si/{room}")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["room"].startswith("mydoctor-"))
+        self.assertEqual(
+            response.data["url"], f"https://meet.jit.si/{response.data['room']}"
+        )
 
         # outsider rejected
         self.auth(self.other)
@@ -131,41 +135,6 @@ class CommunicationApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_video_room_audio_mode(self):
-        appointment = Appointment.objects.create(
-            patient=self.patient,
-            doctor=self.doctor,
-            date=datetime.date(2030, 1, 1),
-            start_time=datetime.time(10, 0),
-            end_time=datetime.time(10, 30),
-            status="confirmed",
-        )
-        self.auth(self.patient)
-        response = self.client.get(
-            f"/api/appointments/{appointment.id}/video-room/?mode=audio"
-        )
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["mode"], "audio")
-        self.assertIn("config.startAudioOnly=true", response.data["url"])
-        from enterprise.models import TelemedicineSession
-        session = TelemedicineSession.objects.get(appointment=appointment)
-        self.assertEqual(session.mode, "audio")
-
-        # invalid mode rejected
-        response = self.client.get(
-            f"/api/appointments/{appointment.id}/video-room/?mode=hologram"
-        )
-        self.assertEqual(response.status_code, 400)
-
-        # default remains plain video without audio-only config
-        self.auth(self.doctor)
-        response = self.client.get(
-            f"/api/appointments/{appointment.id}/video-room/?mode=video"
-        )
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["mode"], "video")
-        self.assertNotIn("startAudioOnly", response.data["url"])
-
 
     def test_notification_preferences_create_delivery_jobs(self):
         from .models import NotificationDelivery, NotificationPreference
@@ -176,7 +145,7 @@ class CommunicationApiTests(TestCase):
         notification = notify(
             self.patient,
             "Payment receipt ready",
-            "Your receipt can be viewed in HealthPilot.",
+            "Your receipt can be viewed in MyDoctor.",
             kind="payment",
             channels=["in_app", "email", "sms"],
         )

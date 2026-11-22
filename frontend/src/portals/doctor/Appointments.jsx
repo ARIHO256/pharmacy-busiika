@@ -11,19 +11,17 @@ const patientName = (a) =>
 
 export default function Appointments() {
   const [tab, setTab] = useState('all')
-  const [scope, setScope] = useState('mine') // mine | organization
   const [rows, setRows] = useState(null)
   const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
 
-  const load = useCallback((status, currentScope) => {
+  const load = useCallback((status) => {
     setRows(null)
     const params = status === 'all' ? {} : { status }
-    if (currentScope === 'organization') params.scope = 'organization'
     appointmentApi.list(params).then((r) => setRows(r.data || [])).catch(() => setRows([]))
   }, [])
 
-  useEffect(() => { load(tab, scope) }, [tab, scope, load])
+  useEffect(() => { load(tab) }, [tab, load])
 
   async function act(id, action) {
     setBusyId(id)
@@ -52,43 +50,23 @@ export default function Appointments() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-2">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-3.5 py-1.5 rounded-full text-sm font-medium capitalize transition ${
-                tab === t ? 'bg-primary-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
+        {TABS.map((t) => (
           <button
-            onClick={() => setScope('mine')}
-            className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition ${
-              scope === 'mine' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-3.5 py-1.5 rounded-full text-sm font-medium capitalize transition ${
+              tab === t ? 'bg-primary-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
             }`}
           >
-            My appointments
+            {t}
           </button>
-          <button
-            onClick={() => setScope('organization')}
-            className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition ${
-              scope === 'organization' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            Whole team
-          </button>
-        </div>
+        ))}
       </div>
 
       {error && <div className="text-sm text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-4 py-2.5">{error}</div>}
 
-      <Card title={`Appointments${tab !== 'all' ? ` — ${tab}` : ''}${scope === 'organization' ? ' (whole team)' : ''}`}>
+      <Card title={`Appointments${tab !== 'all' ? ` — ${tab}` : ''}`}>
         {!rows ? (
           <Spinner label="Loading appointments…" />
         ) : (
@@ -96,7 +74,6 @@ export default function Appointments() {
             columns={[
               { key: 'date', label: 'Date' },
               { key: 'time', label: 'Time', render: (a) => `${(a.start_time || '').slice(0, 5)} – ${(a.end_time || '').slice(0, 5)}` },
-              ...(scope === 'organization' ? [{ key: 'doctor', label: 'Provider', render: (a) => a.doctor_name || `Provider #${a.doctor}` }] : []),
               { key: 'patient', label: 'Patient', render: patientName },
               { key: 'type', label: 'Type', render: (a) => <Badge color={a.type === 'online' ? 'blue' : 'purple'}>{a.type}</Badge> },
               { key: 'reason', label: 'Reason', render: (a) => a.reason || '—' },

@@ -9,7 +9,6 @@ service prevents account views from duplicating registry rules.
 from django.db import IntegrityError, transaction
 
 from accounts.models import ProfileStatus, User
-from enterprise.access import registration_role
 
 from .models import Organization
 
@@ -44,10 +43,9 @@ def organization_type_for_role(role):
 
 def organization_type_for_profile(user, profile=None):
     """Resolve a provider profile to a canonical registry organization type."""
-    role_code = registration_role(user)
-    default_type = organization_type_for_role(role_code)
+    default_type = organization_type_for_role(user.role)
     candidate = getattr(profile, "organization_type", None) if profile is not None else None
-    allowed = ROLE_TO_ALLOWED_ORGANIZATION_TYPES.get(role_code, set())
+    allowed = ROLE_TO_ALLOWED_ORGANIZATION_TYPES.get(user.role, set())
     return candidate if candidate in allowed else default_type
 
 
@@ -89,9 +87,6 @@ def sync_provider_organization(user, profile, *, authoritative_status=False):
         "legal_name": legal_name,
         "trading_name": (profile.org_name or "").strip(),
         "license_number": (profile.license_number or "").strip(),
-        "issuing_authority": getattr(profile, "license_issuer", "") or "",
-        "license_issued_on": getattr(profile, "license_issued_on", None),
-        "license_expires_on": getattr(profile, "license_expires_on", None),
         "contact_email": user.email,
         "phone": user.phone or "",
         "address": profile.address or "",
@@ -127,9 +122,6 @@ def sync_provider_organization(user, profile, *, authoritative_status=False):
     organization.district = defaults["district"]
     organization.license_document = defaults["license_document"]
     organization.services_description = defaults["services_description"]
-    organization.issuing_authority = defaults["issuing_authority"]
-    organization.license_issued_on = defaults["license_issued_on"]
-    organization.license_expires_on = defaults["license_expires_on"]
 
     if defaults["license_number"]:
         duplicate = (

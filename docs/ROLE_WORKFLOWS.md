@@ -1,10 +1,10 @@
-# HealthPilot Role Workspaces and End-to-End Workflows
+# MyDoctor Role Workspaces and End-to-End Workflows
 
 This document describes the enhanced role-based operating model now represented in the Django API and React application. It is the working guide for product, design, backend, frontend, QA and hospital stakeholders.
 
 ## 1. Identity model
 
-HealthPilot separates four concepts that must never be confused:
+MyDoctor separates four concepts that must never be confused:
 
 1. **Account role** — the user's primary portal and default permission set.
 2. **Professional verification** — whether a regulated health professional's practising credential is approved and current.

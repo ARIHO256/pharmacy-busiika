@@ -1,4 +1,3 @@
-import { portalForRole } from '../portals/enterprise/roleCatalog'
 export const ROLE_EXPERIENCE = {
   patient: {
     label: 'Patient',
@@ -130,19 +129,6 @@ export const ROLE_EXPERIENCE = {
   },
 }
 
-const ROLE_ALIASES = { clinical_officer:'doctor', dentist:'doctor', physiotherapist:'doctor', nutritionist:'doctor', psychologist:'doctor', medical_director:'doctor', midwife:'nurse', theatre_nurse:'nurse', accountant:'cashier', finance_manager:'facility_manager', procurement_officer:'facility_manager', quality_officer:'facility_manager', compliance_officer:'facility_manager', hr_officer:'facility_manager', it_support:'facility_manager', claims_reviewer:'insurance_officer', radiologist:'lab_technician', radiographer:'lab_technician', anaesthetist:'doctor', paramedic:'nurse', ambulance_dispatcher:'receptionist' }
-
 export function getRoleExperience(role) {
-  const portal = portalForRole(role)
-  if (portal) {
-    return {
-      label: portal.title.replace(' Workspace', '').replace(' Centre', ''),
-      title: portal.title,
-      eyebrow: portal.eyebrow,
-      description: portal.description,
-      quickAction: { label: portal.modules[0]?.label || 'Open workspace', to: `/${portal.path}/${portal.modules[0]?.id || ''}`, icon: portal.modules[0]?.icon || portal.icon },
-      avatarTone: ['finance_manager','accountant','claims_reviewer','insurance_officer'].includes(role) ? 'orange' : ['quality_officer','compliance_officer','medical_director','it_support'].includes(role) ? 'navy' : ['midwife','physiotherapist','paramedic'].includes(role) ? 'teal' : 'blue',
-    }
-  }
-  return ROLE_EXPERIENCE[role] || ROLE_EXPERIENCE[ROLE_ALIASES[role]] || ROLE_EXPERIENCE.patient
+  return ROLE_EXPERIENCE[role] || ROLE_EXPERIENCE.patient
 }

@@ -1,26 +1,47 @@
+import OrderReceipt from './OrderReceipt'
+import { useAuth } from '../../auth/AuthContext'
 import { servicesApi } from '../../api/endpoints'
-import { Card, Select, Table } from '../../components/ui'
+import { Alert, Button, Card, Input, Modal, Select, Table } from '../../components/ui'
 import { fmtDate, LoadingOrError, money, StatusBadge, useApi } from './shared'
 import { useState } from 'react'
 import { errMsg } from './shared'
 
 const nextOptions = {
   pending: ['confirmed', 'cancelled'],
-  confirmed: ['delivered', 'cancelled'],
+  ready: ['delivered', 'cancelled'],
+  dispatched: ['delivered'],
+}
+
+const statusLabel = {
+  confirmed: 'Confirm order', ready: 'Ready for pickup', dispatched: 'Dispatch',
+  delivered: 'Record handover', cancelled: 'Cancel order',
 }
 
 export default function Orders() {
   const { data: orders, loading, error, reload } = useApi(() => servicesApi.orders())
+  const { user } = useAuth()
+  const [receiptOrder, setReceiptOrder] = useState(null)
+  const canRecordPayment = ['pharmacy', 'pharmacist', 'facility_manager', 'cashier'].includes(user?.role)
   const [updating, setUpdating] = useState(null)
+  const [handover, setHandover] = useState(null)
+  const [reference, setReference] = useState('')
+  const [actionError, setActionError] = useState('')
 
-  const setStatus = async (order, status) => {
+  const setStatus = async (order, status, fields) => {
     if (!status) return
+    setActionError('')
+    if (status === 'delivered' && !fields) {
+      setHandover(order)
+      setReference('')
+      return
+    }
     setUpdating(order.id)
     try {
-      await servicesApi.updateOrder(order.id, status)
+      await servicesApi.updateOrder(order.id, status, fields)
+      setHandover(null)
       reload()
     } catch (e) {
-      alert(errMsg(e))
+      setActionError(errMsg(e))
     } finally {
       setUpdating(null)
     }
@@ -29,6 +50,7 @@ export default function Orders() {
   return (
     <LoadingOrError loading={loading} error={error}>
       <Card title="Customer orders">
+        {actionError && !handover && <Alert tone="danger">{actionError}</Alert>}
         <Table
           empty="No orders yet"
           columns={[
@@ -48,6 +70,13 @@ export default function Orders() {
               ),
             },
             { key: 'total', label: 'Total', render: (o) => money(o.total) },
+            { key: 'payment_recorded', label: 'Payment', render: (o) => (
+              o.payment_recorded || (canRecordPayment && o.status !== 'cancelled' && o.total > 0)
+                ? <Button variant="outline" onClick={() => setReceiptOrder(o)}>
+                    {o.payment_recorded ? 'Print receipt' : 'Record payment'}
+                  </Button>
+                : '—'
+            ) },
             {
               key: 'delivery',
               label: 'Delivery',
@@ -61,12 +90,17 @@ export default function Orders() {
                 ),
             },
             { key: 'created_at', label: 'Placed', render: (o) => fmtDate(o.created_at) },
-            { key: 'status', label: 'Status', render: (o) => <StatusBadge status={o.status} /> },
+            { key: 'status', label: 'Status', render: (o) => ['ready', 'dispatched'].includes(o.status)
+              ? statusLabel[o.status] : <StatusBadge status={o.status} /> },
+            { key: 'dispensed_batches', label: 'Handover and batch trace', render: (o) => <div>
+              {o.handed_over_at && <p>{fmtDate(o.handed_over_at)}</p>}
+              {o.dispensed_batches.map((movement) => <p key={movement.id}>{movement.medicine} · Batch {movement.batch} · Movement #{movement.id}</p>)}
+            </div> },
             {
               key: 'actions',
               label: 'Update',
               render: (o) =>
-                nextOptions[o.status] ? (
+                (user?.role !== 'cashier' && (o.status === 'confirmed' || nextOptions[o.status])) ? (
                   <Select
                     value=""
                     disabled={updating === o.id}
@@ -74,9 +108,9 @@ export default function Orders() {
                     className="min-w-36"
                   >
                     <option value="">Set status…</option>
-                    {nextOptions[o.status].map((s) => (
+                    {(o.status === 'confirmed' ? [o.delivery ? 'dispatched' : 'ready', 'cancelled'] : nextOptions[o.status]).filter((s) => s !== 'cancelled' || !o.payment_recorded).map((s) => (
                       <option key={s} value={s}>
-                        Mark {s}
+                        {statusLabel[s]}
                       </option>
                     ))}
                   </Select>
@@ -88,6 +122,19 @@ export default function Orders() {
           rows={orders || []}
         />
       </Card>
+      {receiptOrder && <OrderReceipt order={receiptOrder} onClose={() => setReceiptOrder(null)} onRecorded={reload} />}
+      {handover && <Modal open title={`Record handover · Order #${handover.id}`}
+        onClose={() => { if (updating === null) setHandover(null) }}>
+        <form className="space-y-3" onSubmit={(event) => {
+          event.preventDefault()
+          setStatus(handover, 'delivered', { handover_reference: reference })
+        }}>
+          {actionError && <Alert tone="danger">{actionError}</Alert>}
+          <Input required maxLength={200} label="Collection or delivery confirmation reference" value={reference}
+            onChange={(event) => setReference(event.target.value)} />
+          <Button disabled={updating !== null} type="submit">Confirm handover</Button>
+        </form>
+      </Modal>}
     </LoadingOrError>
   )
 }

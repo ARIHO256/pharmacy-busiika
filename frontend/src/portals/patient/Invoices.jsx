@@ -1,16 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { paymentApi } from '../../api/endpoints'
 import { Badge, Button, Card, Modal, Spinner, Table } from '../../components/ui'
-import { INVOICE_STATUS_COLORS, fmtUGX } from './utils'
-import { downloadBlob } from '../staff/shared'
+import { INVOICE_STATUS_COLORS } from './utils'
+import { money } from '../staff/shared'
 
 export default function Invoices() {
   const [invoices, setInvoices] = useState(null)
   const [error, setError] = useState('')
   const [receipt, setReceipt] = useState(null)
   const [receiptLoading, setReceiptLoading] = useState(false)
+  const receiptRequest = useRef(0)
   const [receiptError, setReceiptError] = useState('')
-  const [notice, setNotice] = useState('')
 
   useEffect(() => {
     paymentApi
@@ -20,30 +20,20 @@ export default function Invoices() {
   }, [])
 
   const openReceipt = async (inv) => {
+    const request = ++receiptRequest.current
     setReceipt({ loading: true })
     setReceiptLoading(true)
     setReceiptError('')
     try {
       const { data } = await paymentApi.receipt(inv.id)
-      setReceipt(data)
+      if (request === receiptRequest.current) setReceipt(data)
     } catch {
+      if (request !== receiptRequest.current) return
       setReceipt(null)
       setReceiptError('Could not load the receipt for this invoice.')
     } finally {
-      setReceiptLoading(false)
+      if (request === receiptRequest.current) setReceiptLoading(false)
     }
-  }
-
-
-  const downloadInvoice = async (inv) => {
-    setReceiptError('')
-    try { downloadBlob(await paymentApi.invoicePdf(inv.id), `${inv.number}.pdf`) }
-    catch { setReceiptError('Could not generate the invoice PDF.') }
-  }
-  const sendInvoice = async (inv) => {
-    setReceiptError('')
-    try { const { data } = await paymentApi.sendInvoice(inv.id); setNotice(data.detail || 'Invoice sent.') }
-    catch { setReceiptError('Could not send the invoice email.') }
   }
 
   if (error) return <Card className="text-sm text-rose-600">{error}</Card>
@@ -54,15 +44,9 @@ export default function Invoices() {
     {
       key: 'for',
       label: 'For',
-      render: (i) => (
-        <span className="text-slate-600">
-          {i.appointment_info
-            ? `${i.appointment_info.doctor_name || 'Appointment'} · ${i.appointment_info.date || ''}`
-            : 'Appointment'}
-        </span>
-      ),
+      render: (i) => <span className="text-slate-600">{i.appointment_info || 'Appointment'}</span>,
     },
-    { key: 'amount', label: 'Amount', render: (i) => <span className="font-medium">{fmtUGX(i.amount)}</span> },
+    { key: 'amount', label: 'Amount', render: (i) => <span className="font-medium">{money(i.amount, i.currency)}</span> },
     {
       key: 'status',
       label: 'Status',
@@ -73,50 +57,53 @@ export default function Invoices() {
       key: 'actions',
       label: '',
       render: (i) => (
-        <div className="flex flex-wrap gap-1"><Button variant="outline" className="px-3 py-1 text-xs" onClick={() => downloadInvoice(i)}>Invoice PDF</Button><Button variant="outline" className="px-3 py-1 text-xs" onClick={() => sendInvoice(i)}>Email</Button><Button variant="ghost" className="px-3 py-1 text-xs" onClick={() => openReceipt(i)}>Receipt</Button></div>
+        <Button variant="outline" className="px-3 py-1 text-xs" onClick={() => openReceipt(i)}>
+          Receipt
+        </Button>
       ),
     },
   ]
 
   return (
     <div className="space-y-4">
-      {notice && <Card className="text-sm text-emerald-700">{notice}</Card>}
       {receiptError && <Card className="text-sm text-rose-600">{receiptError}</Card>}
       <Card title="My invoices">
         <Table columns={columns} rows={invoices} empty="No invoices yet." />
       </Card>
 
-      <Modal open={!!receipt} onClose={() => setReceipt(null)} title="Receipt">
+      <Modal open={!!receipt} onClose={() => { receiptRequest.current += 1; setReceipt(null) }} title="Receipt">
         {receiptLoading || receipt?.loading ? (
           <Spinner label="Loading receipt…" />
         ) : receipt ? (
           <div className="space-y-3 text-sm">
             <div className="flex justify-between border-b border-slate-100 pb-2">
               <span className="text-slate-500">Invoice number</span>
-              <span className="font-medium text-slate-800">{receipt.invoice_number || receipt.number}</span>
+              <span className="font-medium text-slate-800">{receipt.number}</span>
             </div>
             <div className="flex justify-between border-b border-slate-100 pb-2">
               <span className="text-slate-500">Amount</span>
-              <span className="font-semibold text-primary-600">{fmtUGX(receipt.payment?.amount || receipt.amount)}</span>
+              <span className="font-semibold text-primary-600">{money(receipt.payment?.amount ?? receipt.amount, receipt.currency)}</span>
             </div>
             <div className="flex justify-between border-b border-slate-100 pb-2">
               <span className="text-slate-500">Status</span>
-              <Badge color={INVOICE_STATUS_COLORS[receipt.payment?.status || receipt.status] || 'slate'}>{receipt.payment?.status || receipt.status}</Badge>
+              <Badge color={INVOICE_STATUS_COLORS[receipt.status] || 'slate'}>{receipt.payment?.status || receipt.status || '—'}</Badge>
             </div>
             <div className="flex justify-between border-b border-slate-100 pb-2">
               <span className="text-slate-500">Patient</span>
-              <span className="text-slate-800">{receipt.patient_name || receipt.patient}</span>
+              <span className="text-slate-800">{receipt.patient_name || receipt.patient || '—'}</span>
             </div>
-
+            <div className="flex justify-between border-b border-slate-100 pb-2">
+              <span className="text-slate-500">Doctor</span>
+              <span className="text-slate-800">{receipt.doctor || '—'}</span>
+            </div>
             <div className="flex justify-between border-b border-slate-100 pb-2">
               <span className="text-slate-500">Date</span>
-              <span className="text-slate-800">{receipt.created_at ? new Date(receipt.created_at).toLocaleString() : receipt.date || '—'}</span>
+              <span className="text-slate-800">{receipt.date || receipt.created_at?.slice(0, 10) || '—'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Gateway</span>
-              <span className="text-slate-800">{receipt.payment?.method || receipt.gateway || '—'}</span>
+              <span className="text-slate-800">{receipt.gateway || '—'}</span>
             </div>
-            {receipt.id && <Button onClick={async()=>downloadBlob(await paymentApi.receiptPdf(receipt.id), `${receipt.number}.pdf`)}>Download receipt PDF</Button>}
           </div>
         ) : null}
       </Modal>

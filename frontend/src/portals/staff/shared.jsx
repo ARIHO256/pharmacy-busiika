@@ -29,7 +29,7 @@ export function displayDate(value, withTime = true) {
 }
 
 export function money(value, currency = 'UGX') {
-  return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 0 }).format(Number(value || 0))
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(Number(value || 0))
 }
 
 export function statusBadge(status) {
@@ -49,16 +49,4 @@ export function getError(err) {
   if (!data) return err.message || 'The request failed.'
   if (data.detail) return data.detail
   return Object.entries(data).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join(' · ')
-}
-
-export function downloadBlob(response, filename) {
-  const blob = response.data instanceof Blob ? response.data : new Blob([response.data])
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
 }

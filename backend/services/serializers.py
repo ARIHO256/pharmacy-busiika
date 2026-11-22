@@ -1,35 +1,24 @@
 from rest_framework import serializers
 
-from config.uploads import validate_image_upload
-
 from .models import (
     Bed,
     CartItem,
     HospitalBooking,
     HospitalService,
     InsuranceClaim,
-    InsuranceClaimItem,
-    InsuranceBenefitRule,
-    InsuranceEligibilityCheck,
-    InsurancePreauthorization,
-    InsuranceRemittance,
     InsurancePolicy,
     CriticalResultAcknowledgement,
-    DispensingItem,
-    DispensingRecord,
     LabOrder,
-    LabTestPanel,
-    LabTestPanelItem,
     LabResult,
     LabTest,
     Medicine,
+    MedicineTaxonomyNode,
     Order,
     OrderItem,
     PatientCoverage,
     PharmacyOrder,
     Supplier,
     SupplierProduct,
-    SpecimenEvent,
 )
 
 
@@ -56,6 +45,9 @@ def _user_display(user):
 # Provider directory (public)
 # ---------------------------------------------------------------------------
 class ProviderDirectorySerializer(serializers.Serializer):
+    parent_facility_name = serializers.CharField(required=False)
+    parent_facility_type = serializers.CharField(required=False)
+
     id = serializers.IntegerField()
     org_name = serializers.CharField()
     address = serializers.CharField()
@@ -65,12 +57,96 @@ class ProviderDirectorySerializer(serializers.Serializer):
 # PHARMACY
 # ---------------------------------------------------------------------------
 class MedicineSerializer(serializers.ModelSerializer):
-    image = serializers.ImageField(required=False, allow_null=True, validators=[validate_image_upload])
+    image = serializers.ImageField(required=False, allow_null=True)
+    available_online = serializers.SerializerMethodField()
+    taxonomy_node = serializers.PrimaryKeyRelatedField(
+        queryset=MedicineTaxonomyNode.objects.filter(
+            level=MedicineTaxonomyNode.Level.SUBCATEGORY,
+            parent__level=MedicineTaxonomyNode.Level.CATEGORY,
+            parent__parent__level=MedicineTaxonomyNode.Level.FAMILY,
+        ),
+        required=False, allow_null=True,
+    )
 
     class Meta:
         model = Medicine
-        fields = ["id", "pharmacy", "name", "description", "price", "stock", "image"]
+        fields = ["id", "pharmacy", "name", "description", "price", "stock", "image", "sale_type", "taxonomy_node", "product_attributes", "available_online"]
         read_only_fields = ["id", "pharmacy"]
+
+    def get_available_online(self, obj):
+        from operations.services import online_orderable_batches
+        return online_orderable_batches(obj).filter(quantity__gt=0).exists()
+
+    def validate_catalogue_attributes(self, attrs):
+        from .taxonomy import attribute_fields, is_archived
+
+        previous = getattr(self.instance, "taxonomy_node_id", None)
+        node = attrs.get("taxonomy_node", getattr(self.instance, "taxonomy_node", None))
+        node_id = node.pk if node else None
+        pharmacy_id = self.context.get("pharmacy_id", getattr(self.instance, "pharmacy_id", None))
+        if node_id != previous and node:
+            if node.pharmacy_id not in (None, pharmacy_id) or is_archived(node, pharmacy_id):
+                raise serializers.ValidationError({"taxonomy_node": "Select an active subcategory from your pharmacy catalogue."})
+        if "product_attributes" not in attrs:
+            if node_id != previous:
+                attrs["product_attributes"] = {}
+            return
+
+        data = attrs["product_attributes"]
+        if not isinstance(data, dict):
+            raise serializers.ValidationError({"product_attributes": "Provide an object of catalogue field values."})
+        definitions = {field["key"]: field for field in attribute_fields(node)}
+        clean = {}
+        errors = {}
+        for key, value in data.items():
+            field = definitions.get(key)
+            if field is None:
+                errors[key] = "This field does not belong to the selected subcategory."
+                continue
+            if value in (None, ""):
+                continue
+            if field["type"] == "integer":
+                validator = serializers.IntegerField(min_value=field["min"], max_value=1000000)
+            else:
+                validator = serializers.CharField(max_length=250)
+                if not isinstance(value, str):
+                    errors[key] = "Enter text."
+                    continue
+                if not value.strip():
+                    continue
+            try:
+                clean[key] = validator.run_validation(value)
+            except serializers.ValidationError as error:
+                errors[key] = error.detail
+        if errors:
+            raise serializers.ValidationError({"product_attributes": errors})
+        attrs["product_attributes"] = clean
+
+    def validate(self, attrs):
+        self.validate_catalogue_attributes(attrs)
+        if "sale_type" in attrs:
+            from operations.access import require_role
+            require_role(self.context["request"].user, {"pharmacy", "pharmacist", "facility_manager"})
+            if self.instance and attrs["sale_type"] == "otc" and self.instance.batches.filter(controlled=True).exists():
+                raise serializers.ValidationError({"sale_type": "A product with controlled batch history cannot be classified OTC."})
+        if attrs.get("price", 0) < 0 or attrs.get("stock", 0) < 0:
+            raise serializers.ValidationError("Price and stock cannot be negative.")
+        if self.instance and self.instance.batches.exists() and "stock" in attrs:
+            current = self._available_stock(self.instance)
+            if attrs["stock"] != current:
+                raise serializers.ValidationError({"stock": "Batch-tracked stock must be changed through audited batch movements."})
+        return attrs
+
+    def _available_stock(self, obj):
+        from django.db.models import Sum
+        from django.utils import timezone
+        return obj.batches.filter(status="available", expires_on__gt=timezone.localdate()).aggregate(total=Sum("quantity"))["total"] or 0
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.batches.exists():
+            data["stock"] = self._available_stock(instance)
+        return data
 
 
 class CartItemSerializer(serializers.ModelSerializer):
@@ -90,7 +166,9 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
+    payment_recorded = serializers.SerializerMethodField()
     pharmacy_name = serializers.SerializerMethodField()
+    dispensed_batches = serializers.SerializerMethodField()
     patient_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -103,24 +181,43 @@ class OrderSerializer(serializers.ModelSerializer):
             "pharmacy_name",
             "status",
             "total",
+            "payment_recorded",
             "delivery",
-            "delivery_fee",
             "address",
+            "handed_over_at",
             "created_at",
             "items",
+            "dispensed_batches",
         ]
+
+    def get_payment_recorded(self, obj):
+        return obj.invoice_id is not None
+
+    def get_dispensed_batches(self, obj):
+        request = self.context.get("request")
+        if obj.status != "delivered" or not request or request.user.role != "pharmacist":
+            return []
+        return [{
+            "id": movement.pk, "medicine": movement.batch.medicine.name,
+            "batch": movement.batch.batch_number, "quantity": -movement.quantity,
+        } for movement in obj.stock_movements.filter(kind="dispensed").select_related("batch__medicine")]
 
     def get_pharmacy_name(self, obj):
         return _user_display(obj.pharmacy)
 
     def get_patient_name(self, obj):
-        return _user_display(obj.patient)
+        return _user_display(obj.patient) if obj.patient_id else "Walk-in customer"
 
 
 class PharmacyOrderSerializer(serializers.ModelSerializer):
+    pharmacy_name = serializers.CharField(source="pharmacy.display_name")
     patient_name = serializers.SerializerMethodField()
     prescription_items = serializers.SerializerMethodField()
-    dispensing_records = serializers.SerializerMethodField()
+    prescription_status = serializers.SerializerMethodField()
+    reversible_dispenses = serializers.SerializerMethodField()
+    review = serializers.SerializerMethodField()
+    substitutions = serializers.SerializerMethodField()
+    dispensed_batches = serializers.SerializerMethodField()
 
     class Meta:
         model = PharmacyOrder
@@ -128,19 +225,53 @@ class PharmacyOrderSerializer(serializers.ModelSerializer):
             "id",
             "pharmacy",
             "prescription_id",
+            "pharmacy_name",
             "patient",
             "patient_name",
             "status",
             "created_at",
             "prescription_items",
-            "dispensing_records",
+            "prescription_status",
+            "reversible_dispenses",
+            "handed_over_at",
+            "review",
+            "substitutions",
+            "dispensed_batches",
         ]
+
+    def get_review(self, obj):
+        if not hasattr(obj, "safety_review") or not obj.safety_review.prescription_version:
+            return None
+        review = obj.safety_review
+        return {"notes": review.notes, "counselling": review.counselling, "medication_check": review.medication_check,
+                "product_ids": review.product_ids}
+
+    def get_substitutions(self, obj):
+        from .pharmacy_prescription_views import SubstitutionSerializer
+        return SubstitutionSerializer(obj.substitutions.select_related("replacement", "item"), many=True).data
+
+    def get_dispensed_batches(self, obj):
+        return [{
+            "id": movement.pk, "item": movement.prescription_item_id,
+            "medicine": movement.batch.medicine.name, "batch": movement.batch.batch_number,
+            "quantity": -movement.quantity, "dispensed_at": movement.occurred_at,
+        } for movement in obj.dispensing_movements.filter(kind="dispensed", reversal__isnull=True).select_related("batch__medicine")]
 
     def get_patient_name(self, obj):
         return _user_display(obj.patient)
 
-    def get_dispensing_records(self, obj):
-        return DispensingRecordSerializer(obj.dispensing_records.all(), many=True).data
+    def get_reversible_dispenses(self, obj):
+        request = self.context.get("request")
+        if obj.status != PharmacyOrder.Status.PREPARED or not request or request.user.role != "pharmacist":
+            return []
+        return [{
+            "id": movement.pk, "medicine": movement.batch.medicine.name, "batch": movement.batch.batch_number,
+            "quantity": -movement.quantity, "controlled": movement.batch.controlled,
+        } for movement in obj.dispensing_movements.filter(kind="dispensed", reversal__isnull=True).select_related("batch__medicine")]
+
+    def get_prescription_status(self, obj):
+        prescription = obj.get_prescription()
+        return prescription.status if prescription else None
 
     def get_prescription_items(self, obj):
         prescription = obj.get_prescription()
@@ -152,14 +283,15 @@ class PharmacyOrderSerializer(serializers.ModelSerializer):
             return []
         return [
             {
-                "id": getattr(it, "id", None),
+                "id": it.pk,
+                "dispensed_quantity": it.dispensed_quantity,
                 "medicine_name": getattr(it, "medicine_name", ""),
                 "dosage": getattr(it, "dosage", ""),
                 "frequency": getattr(it, "frequency", ""),
                 "duration": getattr(it, "duration", ""),
+                "route": it.route,
+                "instructions": it.instructions,
                 "quantity": getattr(it, "quantity", 0),
-                "dispensed_quantity": getattr(it, "dispensed_quantity", 0),
-                "instructions": getattr(it, "instructions", ""),
             }
             for it in items
         ]
@@ -180,6 +312,8 @@ class SupplierSerializer(serializers.ModelSerializer):
             "id",
             "pharmacy",
             "suppliername",
+            "qualification_reference",
+            "qualified_until",
             "contact",
             "email",
             "address",
@@ -187,6 +321,16 @@ class SupplierSerializer(serializers.ModelSerializer):
             "products",
         ]
         read_only_fields = ["id", "pharmacy", "supply_date"]
+
+    def validate(self, attrs):
+        reference = attrs.get("qualification_reference", getattr(self.instance, "qualification_reference", ""))
+        expiry = attrs.get("qualified_until", getattr(self.instance, "qualified_until", None))
+        if bool(reference) != bool(expiry):
+            raise serializers.ValidationError("Provide both the qualification reference and expiry date.")
+        if "qualification_reference" in attrs or "qualified_until" in attrs:
+            from operations.access import require_role
+            require_role(self.context["request"].user, {"pharmacy", "pharmacist", "facility_manager"})
+        return attrs
 
     def create(self, validated_data):
         products = validated_data.pop("products", [])
@@ -207,122 +351,9 @@ class SupplierSerializer(serializers.ModelSerializer):
         return instance
 
 
-
-
-class DispensingItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = DispensingItem
-        fields = [
-            "id", "prescription_item_id", "medicine_name", "prescribed_quantity",
-            "dispensed_quantity", "batch_number", "expiry_date",
-            "substituted_product", "label_instructions",
-        ]
-        read_only_fields = ["id"]
-
-
-class DispensingRecordSerializer(serializers.ModelSerializer):
-    pharmacist_name = serializers.SerializerMethodField()
-    items = DispensingItemSerializer(many=True)
-
-    class Meta:
-        model = DispensingRecord
-        fields = [
-            "id", "pharmacy_order", "pharmacist", "pharmacist_name", "status",
-            "clarification_note", "substitution_authorised_by",
-            "counselling_notes", "dispensed_at", "created_at", "updated_at", "items",
-        ]
-        read_only_fields = [
-            "id", "pharmacy_order", "pharmacist", "dispensed_at",
-            "created_at", "updated_at",
-        ]
-
-    def get_pharmacist_name(self, obj):
-        return _user_display(obj.pharmacist)
-
-    def validate(self, attrs):
-        items = attrs.get("items", [])
-        status = attrs.get("status", DispensingRecord.Status.REVIEWED)
-        if status in {DispensingRecord.Status.PARTIAL, DispensingRecord.Status.DISPENSED}:
-            if not items or not any(item.get("dispensed_quantity", 0) > 0 for item in items):
-                raise serializers.ValidationError("At least one dispensed item is required.")
-        if status == DispensingRecord.Status.CLARIFICATION and not attrs.get("clarification_note", "").strip():
-            raise serializers.ValidationError({"clarification_note": "Explain what requires clarification."})
-        return attrs
-
-
 # ---------------------------------------------------------------------------
 # LAB
 # ---------------------------------------------------------------------------
-
-
-class LabTestPanelItemSerializer(serializers.ModelSerializer):
-    test_name = serializers.CharField(source="test.name", read_only=True)
-
-    class Meta:
-        model = LabTestPanelItem
-        fields = ["id", "test", "test_name", "sequence", "required"]
-        read_only_fields = ["id"]
-
-
-class LabTestPanelSerializer(serializers.ModelSerializer):
-    items = LabTestPanelItemSerializer(many=True)
-    lab_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = LabTestPanel
-        fields = [
-            "id", "lab", "lab_name", "name", "code", "description", "price",
-            "active", "created_at", "updated_at", "items",
-        ]
-        read_only_fields = ["id", "lab", "created_at", "updated_at"]
-
-    def get_lab_name(self, obj):
-        return _user_display(obj.lab)
-
-    def validate_items(self, value):
-        if not value:
-            raise serializers.ValidationError("A panel must contain at least one test.")
-        test_ids = [item["test"].id for item in value]
-        if len(test_ids) != len(set(test_ids)):
-            raise serializers.ValidationError("A test cannot appear twice in the same panel.")
-        return value
-
-    def create(self, validated_data):
-        items = validated_data.pop("items", [])
-        panel = LabTestPanel.objects.create(**validated_data)
-        for index, item in enumerate(items, start=1):
-            item.setdefault("sequence", index)
-            LabTestPanelItem.objects.create(panel=panel, **item)
-        return panel
-
-    def update(self, instance, validated_data):
-        items = validated_data.pop("items", None)
-        for name, value in validated_data.items():
-            setattr(instance, name, value)
-        instance.save()
-        if items is not None:
-            instance.items.all().delete()
-            for index, item in enumerate(items, start=1):
-                item.setdefault("sequence", index)
-                LabTestPanelItem.objects.create(panel=instance, **item)
-        return instance
-
-
-class SpecimenEventSerializer(serializers.ModelSerializer):
-    performed_by_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = SpecimenEvent
-        fields = [
-            "id", "order", "event_type", "barcode", "location", "notes",
-            "metadata", "performed_by", "performed_by_name", "occurred_at",
-        ]
-        read_only_fields = ["id", "order", "performed_by", "occurred_at"]
-
-    def get_performed_by_name(self, obj):
-        return _user_display(obj.performed_by)
-
-
 class LabTestSerializer(serializers.ModelSerializer):
     class Meta:
         model = LabTest
@@ -331,6 +362,7 @@ class LabTestSerializer(serializers.ModelSerializer):
 
 
 class LabResultSerializer(serializers.ModelSerializer):
+    is_superseded = serializers.SerializerMethodField()
     acknowledged = serializers.SerializerMethodField()
     acknowledged_by_name = serializers.SerializerMethodField()
     entered_by_name = serializers.SerializerMethodField()
@@ -344,12 +376,12 @@ class LabResultSerializer(serializers.ModelSerializer):
             "value_text", "unit", "reference_low", "reference_high",
             "interpretation", "status", "entered_by", "entered_by_name",
             "verified_by", "verified_by_name", "verified_at", "released_by",
-            "released_by_name", "released_at", "amendment_reason",
+            "released_by_name", "released_at", "escalated_at", "amendment_reason", "supersedes", "is_superseded",
             "acknowledged", "acknowledged_by_name", "created_at", "updated_at",
         ]
         read_only_fields = [
             "order", "entered_by", "verified_by", "verified_at", "released_by",
-            "released_at", "created_at", "updated_at",
+            "released_at", "escalated_at", "created_at", "updated_at",
         ]
 
     def validate(self, attrs):
@@ -368,6 +400,9 @@ class LabResultSerializer(serializers.ModelSerializer):
     def get_released_by_name(self, obj):
         return _user_display(obj.released_by)
 
+    def get_is_superseded(self, obj):
+        return hasattr(obj, "replacement")
+
     def get_acknowledged(self, obj):
         return hasattr(obj, "acknowledgement")
 
@@ -377,6 +412,7 @@ class LabResultSerializer(serializers.ModelSerializer):
 
 
 class LabOrderSerializer(serializers.ModelSerializer):
+    visit_number = serializers.CharField(source="visit.visit_number", read_only=True, default=None)
     test_name = serializers.CharField(source="test.name", read_only=True)
     referring_doctor_name = serializers.SerializerMethodField()
     collected_by_name = serializers.SerializerMethodField()
@@ -385,22 +421,22 @@ class LabOrderSerializer(serializers.ModelSerializer):
     result_file = serializers.SerializerMethodField()
     results = serializers.SerializerMethodField()
     has_critical_result = serializers.SerializerMethodField()
-    specimen_events = SpecimenEventSerializer(many=True, read_only=True)
+    critical_review_pending = serializers.SerializerMethodField()
 
     class Meta:
         model = LabOrder
         fields = [
-            "id", "patient", "patient_name", "lab", "lab_name", "test",
+            "id", "visit", "visit_number", "arrived_at", "patient", "patient_name", "lab", "lab_name", "test",
             "test_name", "referring_doctor", "referring_doctor_name",
             "referring_facility", "clinical_indication", "provisional_diagnosis",
             "priority", "specimen_id", "specimen_type", "collection_notes",
             "rejection_reason", "collected_by", "collected_by_name", "collected_at",
             "received_at", "released_at", "result_released", "prescription_id",
             "status", "result_file", "result_notes", "results",
-            "has_critical_result", "specimen_events", "created_at", "updated_at",
+            "has_critical_result", "critical_review_pending", "created_at", "updated_at",
         ]
         read_only_fields = [
-            "id", "patient", "lab", "test", "collected_by", "collected_at",
+            "id", "visit", "arrived_at", "patient", "lab", "test", "collected_by", "collected_at",
             "received_at", "released_at", "result_released", "created_at", "updated_at",
         ]
 
@@ -436,7 +472,13 @@ class LabOrderSerializer(serializers.ModelSerializer):
         return LabResultSerializer(qs, many=True).data
 
     def get_has_critical_result(self, obj):
-        return obj.results.filter(interpretation=LabResult.Interpretation.CRITICAL).exists()
+        return obj.results.filter(interpretation=LabResult.Interpretation.CRITICAL, released_at__isnull=False, replacement__isnull=True).exists()
+
+    def get_critical_review_pending(self, obj):
+        return obj.results.filter(
+            interpretation=LabResult.Interpretation.CRITICAL,
+            released_at__isnull=False, replacement__isnull=True, acknowledgement__isnull=True,
+        ).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -488,36 +530,15 @@ class BedSerializer(serializers.ModelSerializer):
 # INSURANCE
 # ---------------------------------------------------------------------------
 class InsurancePolicySerializer(serializers.ModelSerializer):
-    benefit_rules = serializers.SerializerMethodField()
-
     class Meta:
         model = InsurancePolicy
-        fields = [
-            "id", "provider", "name", "coverage_percent", "premium", "annual_limit",
-            "deductible", "copay_percent", "copay_fixed", "waiting_period_days",
-            "requires_preauthorization", "network_only", "active", "description",
-            "exclusions", "terms_url", "benefit_rules", "created_at", "updated_at",
-        ]
+        fields = ["id", "provider", "name", "coverage_percent", "premium", "description"]
         read_only_fields = ["id", "provider"]
-
-    def validate_coverage_percent(self, value):
-        if value < 0 or value > 100:
-            raise serializers.ValidationError("Coverage percent must be between 0 and 100.")
-        return value
-
-    def validate_copay_percent(self, value):
-        if value < 0 or value > 100:
-            raise serializers.ValidationError("Copay percent must be between 0 and 100.")
-        return value
-
-    def get_benefit_rules(self, obj):
-        return InsuranceBenefitRuleSerializer(obj.benefit_rules.filter(active=True), many=True).data
 
 
 class PatientCoverageSerializer(serializers.ModelSerializer):
     policy_name = serializers.CharField(source="policy.name", read_only=True)
     coverage_percent = serializers.IntegerField(source="policy.coverage_percent", read_only=True)
-    policy_requires_preauthorization = serializers.BooleanField(source="policy.requires_preauthorization", read_only=True)
     provider_name = serializers.SerializerMethodField()
     patient_name = serializers.SerializerMethodField()
 
@@ -532,136 +553,27 @@ class PatientCoverageSerializer(serializers.ModelSerializer):
             "policy",
             "policy_name",
             "coverage_percent",
-            "policy_requires_preauthorization",
             "member_id",
             "active",
-            "is_current",
-            "effective_from",
-            "expires_on",
-            "dependant_code",
-            "employer_or_group",
-            "verified_at",
-            "last_eligibility_check_at",
         ]
-        read_only_fields = ["id", "patient", "provider", "policy", "is_current", "verified_at", "last_eligibility_check_at"]
+        read_only_fields = ["id", "patient", "provider", "policy"]
 
     def get_provider_name(self, obj):
         return _user_display(obj.provider)
 
     def get_patient_name(self, obj):
         return _user_display(obj.patient)
-
-
-class InsuranceBenefitRuleSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = InsuranceBenefitRule
-        fields = [
-            "id", "policy", "service_code", "service_category", "description",
-            "coverage_percent", "annual_limit", "per_visit_limit", "copay_percent",
-            "copay_fixed", "waiting_period_days", "requires_preauthorization",
-            "excluded", "active", "created_at", "updated_at",
-        ]
-        read_only_fields = ["id", "policy", "created_at", "updated_at"]
-
-    def validate_coverage_percent(self, value):
-        if value is not None and not 0 <= value <= 100:
-            raise serializers.ValidationError("Coverage percent must be between 0 and 100.")
-        return value
-
-    def validate_copay_percent(self, value):
-        if value is not None and not 0 <= value <= 100:
-            raise serializers.ValidationError("Copay percent must be between 0 and 100.")
-        return value
-
-
-class InsuranceEligibilityCheckSerializer(serializers.ModelSerializer):
-    patient_name = serializers.SerializerMethodField()
-    policy_name = serializers.CharField(source="coverage.policy.name", read_only=True)
-
-    class Meta:
-        model = InsuranceEligibilityCheck
-        fields = [
-            "id", "coverage", "patient", "patient_name", "provider", "member_id",
-            "policy_name", "service_code", "service_category", "estimated_amount",
-            "result", "coverage_percent", "covered_amount", "patient_responsibility",
-            "requires_preauthorization", "reason", "response_snapshot", "requested_by",
-            "checked_at",
-        ]
-        read_only_fields = fields
-
-    def get_patient_name(self, obj):
-        return _user_display(obj.patient)
-
-
-class InsurancePreauthorizationSerializer(serializers.ModelSerializer):
-    patient_name = serializers.SerializerMethodField()
-    policy_name = serializers.CharField(source="policy.name", read_only=True)
-    provider_name = serializers.SerializerMethodField()
-    reviewed_by_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = InsurancePreauthorization
-        fields = [
-            "id", "authorization_number", "patient", "patient_name", "provider",
-            "provider_name", "policy", "policy_name", "coverage", "requesting_facility",
-            "service_code", "service_name", "clinical_indication", "diagnosis_code",
-            "requested_amount", "approved_amount", "status", "decision_reason",
-            "reviewed_by", "reviewed_by_name", "reviewed_at", "valid_until",
-            "created_at", "updated_at",
-        ]
-        read_only_fields = [
-            "id", "authorization_number", "patient", "provider", "policy", "coverage",
-            "status", "approved_amount", "decision_reason", "reviewed_by", "reviewed_at",
-            "created_at", "updated_at",
-        ]
-
-    def get_patient_name(self, obj):
-        return _user_display(obj.patient)
-
-    def get_provider_name(self, obj):
-        return _user_display(obj.provider)
-
-    def get_reviewed_by_name(self, obj):
-        return _user_display(obj.reviewed_by)
-
-
-class InsuranceClaimItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = InsuranceClaimItem
-        fields = [
-            "id", "invoice_item_id", "service_code", "description", "quantity",
-            "unit_price", "requested_amount", "approved_amount", "status", "reason",
-        ]
-        read_only_fields = ["id"]
-
-
-class InsuranceRemittanceSerializer(serializers.ModelSerializer):
-    claim_number = serializers.CharField(source="claim.claim_number", read_only=True)
-    patient_name = serializers.CharField(source="claim.patient.display_name", read_only=True)
-
-    class Meta:
-        model = InsuranceRemittance
-        fields = [
-            "id", "provider", "claim", "claim_number", "patient_name",
-            "remittance_number", "paid_amount", "payment_reference", "paid_on",
-            "notes", "created_by", "created_at",
-        ]
-        read_only_fields = ["id", "provider", "created_by", "created_at"]
 
 
 class InsuranceClaimSerializer(serializers.ModelSerializer):
     patient_name = serializers.SerializerMethodField()
     invoice_number = serializers.SerializerMethodField()
     policy_name = serializers.CharField(source="policy.name", read_only=True)
-    reviewed_by_name = serializers.SerializerMethodField()
-    items = InsuranceClaimItemSerializer(many=True, read_only=True)
-    remittances = InsuranceRemittanceSerializer(many=True, read_only=True)
 
     class Meta:
         model = InsuranceClaim
         fields = [
             "id",
-            "claim_number",
             "patient",
             "patient_name",
             "provider",
@@ -669,32 +581,11 @@ class InsuranceClaimSerializer(serializers.ModelSerializer):
             "invoice_number",
             "policy",
             "policy_name",
-            "coverage",
-            "preauthorization",
             "status",
             "amount",
-            "approved_amount",
-            "patient_responsibility",
-            "diagnosis_code",
-            "clinical_summary",
-            "decision_reason",
-            "requested_by",
-            "reviewed_by",
-            "reviewed_by_name",
-            "submitted_at",
-            "reviewed_at",
-            "paid_at",
-            "items",
-            "remittances",
             "created_at",
-            "updated_at",
         ]
-        read_only_fields = [
-            "id", "claim_number", "patient", "provider", "policy", "coverage",
-            "preauthorization", "status", "approved_amount", "patient_responsibility",
-            "decision_reason", "requested_by", "reviewed_by", "reviewed_at", "paid_at",
-            "submitted_at", "created_at", "updated_at",
-        ]
+        read_only_fields = ["id", "patient", "provider", "policy", "created_at"]
 
     def get_patient_name(self, obj):
         return _user_display(obj.patient)
@@ -704,6 +595,3 @@ class InsuranceClaimSerializer(serializers.ModelSerializer):
         if invoice is None:
             return None
         return getattr(invoice, "number", None)
-
-    def get_reviewed_by_name(self, obj):
-        return _user_display(obj.reviewed_by)

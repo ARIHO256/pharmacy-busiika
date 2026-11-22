@@ -1,13 +1,16 @@
 import { useState } from 'react'
+import { useAuth } from '../../auth/AuthContext'
 import client from '../../api/client'
 import { servicesApi } from '../../api/endpoints'
 import { Button, Card, Input, Modal, Table } from '../../components/ui'
 import { errMsg, ErrorNote, fmtDate, LoadingOrError, money, useApi } from './shared'
 
-const emptyForm = { suppliername: '', contact: '', email: '', address: '', products: [] }
+const emptyForm = { qualification_reference: '', qualified_until: '', suppliername: '', contact: '', email: '', address: '', products: [] }
 const emptyProduct = { name: '', qty: '', price: '' }
 
 export default function Suppliers() {
+  const { user } = useAuth()
+  const canQualify = user?.role !== 'storekeeper'
   const { data: suppliers, loading, error, reload } = useApi(() => servicesApi.suppliers())
   const [modal, setModal] = useState(null)
   const [form, setForm] = useState(emptyForm)
@@ -22,6 +25,8 @@ export default function Suppliers() {
 
   const openEdit = (s) => {
     setForm({
+      qualification_reference: s.qualification_reference || '',
+      qualified_until: s.qualified_until || '',
       suppliername: s.suppliername || '',
       contact: s.contact || '',
       email: s.email || '',
@@ -41,6 +46,10 @@ export default function Suppliers() {
     setSaveError('')
     try {
       const payload = {
+        ...(canQualify ? {
+          qualification_reference: form.qualification_reference.trim(),
+          qualified_until: form.qualified_until || null,
+        } : {}),
         suppliername: form.suppliername,
         contact: form.contact,
         email: form.email,
@@ -87,6 +96,7 @@ export default function Suppliers() {
             { key: 'contact', label: 'Contact', render: (s) => s.contact || '—' },
             { key: 'email', label: 'Email', render: (s) => s.email || '—' },
             { key: 'address', label: 'Address', render: (s) => s.address || '—' },
+            { key: 'qualified_until', label: 'Qualified until', render: (s) => s.qualified_until || 'Unqualified' },
             { key: 'supply_date', label: 'Since', render: (s) => fmtDate(s.supply_date) },
             {
               key: 'products',
@@ -129,6 +139,12 @@ export default function Suppliers() {
 
       <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.editing ? 'Edit supplier' : 'Add supplier'} wide>
         <form onSubmit={save} className="space-y-4">
+          {canQualify && <div className="grid gap-3 sm:grid-cols-2">
+            <Input label="Qualification reference" value={form.qualification_reference}
+              onChange={(event) => setForm({ ...form, qualification_reference: event.target.value })} />
+            <Input type="date" label="Qualified until" value={form.qualified_until}
+              onChange={(event) => setForm({ ...form, qualified_until: event.target.value })} />
+          </div>}
           <ErrorNote error={saveError} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input

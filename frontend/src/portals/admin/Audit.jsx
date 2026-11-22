@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Badge, Card, Spinner } from '../../components/ui'
-import { adminApi } from '../../api/endpoints'
+import { Alert, Badge, Card, Spinner } from '../../components/ui'
+import { adminApi, governanceApi } from '../../api/endpoints'
 import { fmtDateTime } from './helpers'
 
 const ACTION_COLORS = [
@@ -21,25 +21,31 @@ export default function Audit() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    adminApi
-      .audit()
-      .then((res) => setItems(res.data))
-      .catch(() => {
-        setItems([])
-        setError('Failed to load audit log.')
-      })
+    let active = true
+    Promise.allSettled([adminApi.audit(), governanceApi.auditEvents({ limit: 200 })]).then(([legacy, governance]) => {
+      if (!active) return
+      const platformEvents = legacy.status === 'fulfilled' ? legacy.value.data.map((event) => ({
+        ...event, id: `platform:${event.id}`, source: 'Platform',
+      })) : []
+      const clinicalEvents = governance.status === 'fulfilled' ? governance.value.data.map((event) => ({
+        id: `governance:${event.id}`, source: 'Governance', action: event.action,
+        user: event.actor_name, created_at: event.created_at,
+        meta: { ...event.metadata, purpose: event.purpose, decision: event.decision,
+          resource: [event.resource_type, event.resource_id].filter(Boolean).join(' ') },
+      })) : []
+      if (legacy.status === 'rejected' || governance.status === 'rejected') {
+        setError('Some audit records could not be loaded.')
+      }
+      setItems([...platformEvents, ...clinicalEvents].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)))
+    })
+    return () => { active = false }
   }, [])
 
-  if (error)
-    return (
-      <Card>
-        <p className="text-sm text-rose-600">{error}</p>
-      </Card>
-    )
   if (items === null) return <Spinner label="Loading audit log…" />
 
   return (
-    <Card title={`Audit Log (${items.length})`}>
+    <Card title={`Recent audit events (${items.length})`}>
+      {error && <Alert tone="danger" className="mb-4">{error}</Alert>}
       {items.length === 0 ? (
         <p className="text-sm text-slate-400 text-center py-8">No audit events yet</p>
       ) : (
@@ -48,6 +54,7 @@ export default function Audit() {
             <li key={log.id} className="ml-6">
               <span className="absolute -left-1.5 mt-1.5 w-3 h-3 rounded-full bg-primary-600 ring-4 ring-primary-50" />
               <div className="flex flex-wrap items-center gap-2">
+                <Badge>{log.source}</Badge>
                 <Badge color={actionColor(log.action)}>{log.action}</Badge>
                 <span className="text-sm text-slate-600">{log.user || 'system'}</span>
                 <span className="text-xs text-slate-400">{fmtDateTime(log.created_at)}</span>

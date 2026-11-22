@@ -1,0 +1,402 @@
+[
+  {
+    "code": "NDA/MAL/HDP/0003",
+    "product": "UMOXIL CLAV 625",
+    "ingredient": "AMOXICILLIN + CLAVULANATE POTASSIUM",
+    "strength": "500 MG + 125 MG",
+    "form": "ORAL SOLID ORDINARY FILM-COATED TABLETS",
+    "pack": "1.0X2.0X7.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0006",
+    "product": "DIAMIDE",
+    "ingredient": "GLIBENCLAMIDE + METFORMIN HYDROCHLORIDE",
+    "strength": "5MG + 500MG",
+    "form": "ORAL SOLID ORDINARY FILM-COATED TABLETS",
+    "pack": "1.0X10.0X12.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0007",
+    "product": "PROCIP SYRUP",
+    "ingredient": "CYPROHEPTADINE HYDROCHLORIDE",
+    "strength": "2MG/5ML",
+    "form": "ORAL LIQUID ORDINARY SYRUPS",
+    "pack": "1.0X100.0 ML BOTTLE,1.0X200.0 ML BOTTLE"
+  },
+  {
+    "code": "NDA/MAL/HDP/012",
+    "product": "PENGESIC SR",
+    "ingredient": "TRAMADOL HYDROCHLORIDE SR",
+    "strength": "100MG",
+    "form": "ORAL SOLID RETARD TABLETS",
+    "pack": "1.0X3.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0013",
+    "product": "IMPLANON NXT",
+    "ingredient": "ETONOGESTREL",
+    "strength": "68MG",
+    "form": "PARENTERAL RETARD IMPLANTS",
+    "pack": "1.0X68.0 MG IMPLANT"
+  },
+  {
+    "code": "NDA/MAL/HDP/0016",
+    "product": "CODIMEX-CT TABLETS",
+    "ingredient": "CETIRIZINE DIHYDROCHLORIDE",
+    "strength": "10MG",
+    "form": "ORAL SOLID ORDINARY FILM-COATED TABLETS",
+    "pack": "1.0X10.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0017",
+    "product": "S-HYDRO",
+    "ingredient": "HYDROCORTISONE",
+    "strength": "100MG",
+    "form": "PARENTERAL ORDINARY DRY VIALS",
+    "pack": "1.0X10.0X7.5 ML VIAL,; 1.0X50.0X100.0 MG VIAL"
+  },
+  {
+    "code": "NDA/MAL/HDP/0021",
+    "product": "QUINS",
+    "ingredient": "QUININE DIHYDROCHLORIDE",
+    "strength": "300MG/ML",
+    "form": "PARENTERAL ORDINARY AMPOULES",
+    "pack": "1.0X100.0X2.0 ML AMPOULE,1.0X2.0X5.0X2.0 ML AMPOULE"
+  },
+  {
+    "code": "NDA/MAL/HDP/0022",
+    "product": "QUININE SULPHATE",
+    "ingredient": "QUININE SULPHATE",
+    "strength": "300MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X10.0X10.0 TABLET BLISTER,1.0X1000.0 TABLET CONTAINER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0024",
+    "product": "AMPICLOXA",
+    "ingredient": "AMPICILLIN + CLOXACILLIN",
+    "strength": "250 MG + 250 MG",
+    "form": "ORAL SOLID ORDINARY CAPSULES",
+    "pack": "1.0X10.0X10.0 CAPSULE BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0030",
+    "product": "TRADMIN",
+    "ingredient": "TRAMADOL HYDROCHLORIDE",
+    "strength": "50MG/ML",
+    "form": "PARENTERAL ORDINARY AMPOULES",
+    "pack": "1.0X5.0X2.0 ML AMPOULE"
+  },
+  {
+    "code": "NDA/MAL/HDP/0031",
+    "product": "CEFTATIME-SB 1.5",
+    "ingredient": "CEFTRIAXONE+SULBACTAM",
+    "strength": "1000MG+500MG",
+    "form": "PARENTERAL ORDINARY DRY VIALS",
+    "pack": "1.0X1.5 G VIAL"
+  },
+  {
+    "code": "NDA/MAL/HDP/0033",
+    "product": "ELYVATE CREAM",
+    "ingredient": "BETAMETHASONE VALERATE",
+    "strength": "0.1%W/W",
+    "form": "TOPICAL EXTERNAL CREAMS",
+    "pack": "1.0X15.0 G TUBE"
+  },
+  {
+    "code": "NDA/MAL/HDP/0041",
+    "product": "RECIM",
+    "ingredient": "CIMETIDINE",
+    "strength": "200MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X10.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0071",
+    "product": "SUMAFIX 100",
+    "ingredient": "SUMATRIPTAN SUCCINATE",
+    "strength": "100 MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X5.0X4.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0075",
+    "product": "SY NRIAM",
+    "ingredient": "ARTEROLANE MALEATE + PIPERAQUINE PHOSPHATE",
+    "strength": "150 MG + 750 MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X3.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0077",
+    "product": "X-SONE",
+    "ingredient": "DEXAMETHASONE SODIUM PHOSPHATE",
+    "strength": "0.1 % W/V",
+    "form": "OPHTHALMIC DROPS",
+    "pack": "1.0X10.0 ML VIAL"
+  },
+  {
+    "code": "NDA/MAL/HDP/0079",
+    "product": "REVOKE 72",
+    "ingredient": "LEVONORGESTREL",
+    "strength": "750MCG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X2.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0083",
+    "product": "ZINNIA-F",
+    "ingredient": "LEVONORGESTREL & ETHINYLESTRADIOL + FERROUS FUMARATE",
+    "strength": "150MCG + 30MCG + 75MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X3.0X28.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0088",
+    "product": "D-LYTE CO-PACK",
+    "ingredient": "ANHYDROUS GLUCOSE+SODIUM CHLORIDE+TRISODIUM CITRATE+POTASSIUM CHLORIDE/ZINC, ANHYDROUS GLUCOSE+SODIUM CHLORIDE+TRISODIUM CITRATE+POTASSIUM",
+    "strength": "2.7MG+0.52MG+0.58MG+0.30MG+20MG PER 200ML,6.75MG+1.30MG+1.45MG+0.75MG+20MG PER 500ML SACHET,13.5MG+2.60MG+2.90MG+1.50MG+20MG PER 1000ML SACHET",
+    "form": "ORAL LIQUID ORDINARY COMBINATION PACK POWDERS/GRANULES",
+    "pack": "4.0X500.0 ML SACHET + 1*10 BLISTERS,10.0X200.0 ML SACHET + 1*10 BLISTERS,2.0X1000.0 ML SACHET + 1*10 BLISTERS"
+  },
+  {
+    "code": "NDA/MAL/HDP/0097",
+    "product": "SAFELEVO 750",
+    "ingredient": "LEVOFLOXACIN�",
+    "strength": "750MG",
+    "form": "ORAL SOLID ORDINARY FILM-COATED TABLETS",
+    "pack": "1.0X3.0X10.0 TABLET BLISTER,1.0X1.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0098",
+    "product": "ATOREM 10",
+    "ingredient": "ATORVASTATIN",
+    "strength": "10MG",
+    "form": "ORAL SOLID; ORDINARY FILM-COATED TABLETS",
+    "pack": "1.0X3.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0101",
+    "product": "AGOTETRA CAPSULES",
+    "ingredient": "TETRACYCLINE HYDROCHLORIDE",
+    "strength": "250MG",
+    "form": "ORAL SOLID; ORDINARY CAPSULES",
+    "pack": "10.0X10.0 CAPSULE BLISTER,1.0X0.500.0 CAPSULE CONTAINER,1.0X100.0 CAPSULE CONTAINER,1.0X100.0 CAPSULE CONTAINER,1.0X100.0X10.0 CAPSULE BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0102",
+    "product": "SILMELT 100",
+    "ingredient": "SILDENAFIL CITRATE",
+    "strength": "100MG",
+    "form": "ORAL SOLID; ORDINARY FILM-COATED TABLETS",
+    "pack": "1.0X2.0X2.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0103",
+    "product": "ATOREM 20",
+    "ingredient": "ATORVASTATIN",
+    "strength": "20MG",
+    "form": "ORAL SOLID ORDINARY FILM-COATED TABLETS",
+    "pack": "1.0X3.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0104",
+    "product": "SILMELT 50",
+    "ingredient": "SILDENAFIL CITRATE",
+    "strength": "50MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X2.0X2.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0105",
+    "product": "AGOSPRIN TABLETS",
+    "ingredient": "ACETYL SALICYLIC ACID",
+    "strength": "300MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "10.0X10.0 TABLET BLISTER,1.0X500.0 TABLET CONTAINER,1.0X100.0 TABLET CONTAINER,1.0X1000.0 TABLET CONTAINER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0110",
+    "product": "SAFETELMI 40",
+    "ingredient": "TELMISARTAN",
+    "strength": "40MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X3.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0111",
+    "product": "SAFETELMI 80",
+    "ingredient": "TELMISARTAN",
+    "strength": "80MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X3.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0112",
+    "product": "EXFORGE 5MG/160MG",
+    "ingredient": "AMLODIPINE + VALSARTAN",
+    "strength": "5 MG + 160 MG",
+    "form": "ORAL SOLID ORDINARY FILM-COATED TABLETS",
+    "pack": "1.0X2.0X14.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0114",
+    "product": "BREATH E ZY 4",
+    "ingredient": "MONTELUKAST SODIUM",
+    "strength": "4MG",
+    "form": "ORAL SOLID ORDINARY CHEWABLE TABLETS",
+    "pack": "1.0X3.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0116",
+    "product": "BREATH E ZY CW 5",
+    "ingredient": "MONTELUKAST SODIUM",
+    "strength": "5MG",
+    "form": "ORAL SOLID ORDINARY CHEWABLE TABLETS",
+    "pack": "1.0X3.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0118",
+    "product": "ZOCEF 750MG",
+    "ingredient": "CEFUROXIME SODIUM",
+    "strength": "750MG",
+    "form": "PARENTERAL ORDINARY DRY VIALS",
+    "pack": "1.0X750.0 MG VIAL + 1 AMPOULE WFI"
+  },
+  {
+    "code": "NDA/MAL/HDP/0119",
+    "product": "DACOLD",
+    "ingredient": "CAFFEINE ANHYDROUS+CHLORPHENIRAMINE MALEATE+PARACETAMOL+PSEUDOEPHEDRINE",
+    "strength": "30MG+4MG+400MG+30MG",
+    "form": "ORAL SOLID ORDINARY CAPSULES",
+    "pack": "1.0X10.0X10.0 CAPSULE BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0121",
+    "product": "PEDZINC",
+    "ingredient": "ZINC SULPHATE",
+    "strength": "20MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0139",
+    "product": "MOXAFORTE",
+    "ingredient": "FLUCLOXACILLIN SODIUM + AMOXICILLIN TRIHYDRATE",
+    "strength": "250MG + 250MG",
+    "form": "ORAL SOLID ORDINARY CAPSULES",
+    "pack": "1.0X2.0X10.0 CAPSULE BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0141",
+    "product": "NYCOSTAT SUSPENSION",
+    "ingredient": "NYSTATIN",
+    "strength": "100,000 I.U/ML",
+    "form": "ORAL LIQUID ORDINARY SUSPENSIONS",
+    "pack": "1.0X30.0 ML BOTTLE"
+  },
+  {
+    "code": "NDA/MAL/HDP/0157",
+    "product": "RECODIN",
+    "ingredient": "CODEINE PHOSPHATE + CHLORPHENIRAMINE MALEATE",
+    "strength": "10MG + 4MG /5ML",
+    "form": "ORAL LIQUID ORDINARY SYRUPS",
+    "pack": "1.0X100.0 ML BOTTLE"
+  },
+  {
+    "code": "NDA/MAL/HDP/0158",
+    "product": "KIPEL 10",
+    "ingredient": "MONTELUKAST SODIUM",
+    "strength": "10MG",
+    "form": "ORAL SOLID ORDINARY FILM-COATED TABLETS",
+    "pack": "1.0X3.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0160",
+    "product": "TIZIGESIC",
+    "ingredient": "TIZANIDINE HYDROCHLORIDE",
+    "strength": "2MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X3.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0161",
+    "product": "TRAMAREN",
+    "ingredient": "TRAMADOL HYDROCHLORIDE",
+    "strength": "50MG",
+    "form": "ORAL SOLID ORDINARY CAPSULES",
+    "pack": "1.0X10.0X10.0 CAPSULE BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0162",
+    "product": "COSYP-D LINCTUS",
+    "ingredient": "DEXTROMETHORPHAN HYDROBROMIDE + CHLORPHENAMINE MALEATE",
+    "strength": "10MG +4MG /5ML",
+    "form": "ORAL LIQUID ORDINARY SYRUPS",
+    "pack": "1.0X100.0 ML BOTTLE"
+  },
+  {
+    "code": "NDA/MAL/HDP/0163",
+    "product": "PHENAREN",
+    "ingredient": "PROMETHAZINE HYDROCHLORIDE",
+    "strength": "5MG/5ML",
+    "form": "ORAL LIQUID ORDINARY SYRUPS",
+    "pack": "1.0X60.0 ML BOTTLE"
+  },
+  {
+    "code": "NDA/MAL/HDP/0164",
+    "product": "RENPRESS",
+    "ingredient": "PROPRANOLOL",
+    "strength": "40MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X10.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0165",
+    "product": "TOLANZ 5",
+    "ingredient": "OLANZAPINE ORODISPERSIBLE TABLETS",
+    "strength": "5MG",
+    "form": "ORAL SOLID ORDINARY ORALLY DISINTEGRATING TABLETS",
+    "pack": "1.0X3.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0166",
+    "product": "X-PEL",
+    "ingredient": "MEBENDAZOLE",
+    "strength": "100MG/5ML",
+    "form": "ORAL LIQUID ORDINARY SUSPENSIONS",
+    "pack": "1.0X30.0 ML BOTTLE"
+  },
+  {
+    "code": "NDA/MAL/HDP/0186",
+    "product": "BBC SPRAY",
+    "ingredient": "BENZOCAINE+BENZYDAMINE+CATA LKONIUM CHLORIDE",
+    "strength": "1.5%W/V+0.15%W/V+0.0413%W/V",
+    "form": "ORAL TOPICAL SPRAYS WITHOUT GAS",
+    "pack": "1.0X25.0 ML BOTTLE"
+  },
+  {
+    "code": "NDA/MAL/HDP/0187",
+    "product": "KAPRON TABLET",
+    "ingredient": "TRANEXAMIC ACID",
+    "strength": "500 MG",
+    "form": "ORAL SOLID ORDINARY TABLETS",
+    "pack": "1.0X2.0X10.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0188",
+    "product": "LEVOXIN",
+    "ingredient": "LEVOFLOXACIN",
+    "strength": "500MG",
+    "form": "ORAL SOLID ORDINARY FILM-COATED TABLETS",
+    "pack": "1.0X5.0 TABLET BLISTER"
+  },
+  {
+    "code": "NDA/MAL/HDP/0190",
+    "product": "ACNE FREE CREAM",
+    "ingredient": "TRETINOIN",
+    "strength": "50MG",
+    "form": "TOPICAL EXTERNAL CREAMS",
+    "pack": ", 1X30 G TUBE"
+  }
+]

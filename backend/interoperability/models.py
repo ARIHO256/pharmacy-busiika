@@ -93,6 +93,7 @@ class OutboxEvent(models.Model):
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
         PUBLISHED = "published", "Published"
         FAILED = "failed", "Failed"
         DEAD_LETTER = "dead_letter", "Dead letter"
@@ -125,6 +126,7 @@ class OutboxEvent(models.Model):
     next_attempt_at = models.DateTimeField(null=True, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True, default="")
+    locked_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["occurred_at"]

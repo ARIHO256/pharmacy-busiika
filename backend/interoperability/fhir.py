@@ -5,7 +5,7 @@ from clinical.models import Allergy, CarePlan, ClinicalEncounter, Condition, Med
 from governance.models import Consent
 
 FHIR_VERSION = "4.0.1"
-FHIR_FORMAT = "HealthPilot FHIR R4-aligned draft export; not a certified national implementation guide"
+FHIR_FORMAT = "MyDoctor FHIR R4-aligned draft export; not a certified national implementation guide"
 
 
 def _reference(resource_type, object_id):
@@ -30,7 +30,7 @@ def _compact(value):
 def _entry(resource):
     resource = _compact(resource)
     return {
-        "fullUrl": f"urn:uuid:healthpilot-{resource['resourceType'].lower()}-{resource['id']}",
+        "fullUrl": f"urn:uuid:mydoctor-{resource['resourceType'].lower()}-{resource['id']}",
         "resource": resource,
     }
 
@@ -40,8 +40,8 @@ def patient_resource(patient):
     resource = {
         "resourceType": "Patient",
         "id": str(patient.id),
-        "meta": {"tag": [{"system": "urn:healthpilot:export", "code": "r4-aligned-draft", "display": FHIR_FORMAT}]},
-        "identifier": [{"system": "urn:healthpilot:patient-id", "value": str(patient.id)}],
+        "meta": {"tag": [{"system": "urn:mydoctor:export", "code": "r4-aligned-draft", "display": FHIR_FORMAT}]},
+        "identifier": [{"system": "urn:mydoctor:patient-id", "value": str(patient.id)}],
         "active": patient.is_active,
         "name": [{"use": "official", "family": patient.last_name or "", "given": [patient.first_name] if patient.first_name else []}],
         "telecom": [item for item in [
@@ -69,7 +69,7 @@ def allergy_resource(obj):
             obj.Verification.REFUTED: "refuted",
         }.get(obj.verification, "unconfirmed")}]},
         "patient": {"reference": _reference("Patient", obj.patient_id)},
-        "code": _coding("urn:healthpilot:local:allergy", str(obj.id), obj.substance),
+        "code": _coding("urn:mydoctor:local:allergy", str(obj.id), obj.substance),
         "reaction": [{"manifestation": [{"text": obj.reaction}], "severity": obj.severity if obj.severity in ["mild", "moderate", "severe"] else None}] if obj.reaction else [],
         "recordedDate": obj.created_at.isoformat(),
     }
@@ -87,7 +87,7 @@ def condition_resource(obj):
             obj.Verification.REFUTED: "refuted",
         }.get(obj.verification, "unconfirmed")}]},
         "subject": {"reference": _reference("Patient", obj.patient_id)},
-        "code": _coding(obj.code_system or "urn:healthpilot:local:condition", obj.code or str(obj.id), obj.display),
+        "code": _coding(obj.code_system or "urn:mydoctor:local:condition", obj.code or str(obj.id), obj.display),
         "onsetDateTime": obj.onset_date.isoformat() if obj.onset_date else None,
         "recordedDate": obj.created_at.isoformat(),
         "note": [{"text": obj.notes}] if obj.notes else [],
@@ -100,7 +100,7 @@ def medication_resource(obj):
         "id": str(obj.id),
         "status": obj.status,
         "subject": {"reference": _reference("Patient", obj.patient_id)},
-        "medicationCodeableConcept": _coding("urn:healthpilot:local:medication", str(obj.id), obj.medication_name),
+        "medicationCodeableConcept": _coding("urn:mydoctor:local:medication", str(obj.id), obj.medication_name),
         "dosage": [{"text": " ".join(part for part in [obj.dose, obj.frequency, obj.route] if part)}],
         "dateAsserted": obj.created_at.isoformat(),
         "note": [{"text": obj.notes}] if obj.notes else [],
@@ -113,7 +113,7 @@ def observation_resource(obj):
         "id": str(obj.id),
         "status": "final",
         "category": [{"text": obj.category}],
-        "code": _coding(obj.code_system or "urn:healthpilot:local:observation", obj.code or str(obj.id), obj.display),
+        "code": _coding(obj.code_system or "urn:mydoctor:local:observation", obj.code or str(obj.id), obj.display),
         "subject": {"reference": _reference("Patient", obj.patient_id)},
         "effectiveDateTime": obj.observed_at.isoformat(),
         "issued": obj.created_at.isoformat(),
@@ -174,7 +174,7 @@ def consent_resource(obj):
                 "start": obj.valid_from.isoformat(),
                 "end": obj.valid_until.isoformat() if obj.valid_until else None,
             },
-            "purpose": [{"system": "urn:healthpilot:purpose", "code": obj.purpose}],
+            "purpose": [{"system": "urn:mydoctor:purpose", "code": obj.purpose}],
             "data": [{"meaning": "instance", "reference": {"display": category}} for category in obj.data_categories],
         },
     }
@@ -193,20 +193,14 @@ def patient_summary_bundle(patient, viewer=None):
     entries.extend(_entry(care_plan_resource(obj)) for obj in CarePlan.objects.filter(patient=patient))
 
     consent_qs = Consent.objects.filter(patient=patient)
-    if viewer is not None:
-        try:
-            from enterprise.access import active_role
-            viewer_role = active_role(viewer)
-        except Exception:
-            viewer_role = getattr(viewer, "role", None)
-        if viewer_role in {"doctor", "clinical_officer", "dentist", "physiotherapist", "nutritionist", "psychologist", "medical_director"}:
-            consent_qs = consent_qs.filter(Q(granted_to=viewer) | Q(granted_to__isnull=True))
+    if viewer is not None and getattr(viewer, "role", None) == "doctor":
+        consent_qs = consent_qs.filter(Q(granted_to=viewer) | Q(granted_to__isnull=True))
     entries.extend(_entry(consent_resource(obj)) for obj in consent_qs)
     return {
         "resourceType": "Bundle",
         "type": "collection",
         "timestamp": timezone.now().isoformat(),
-        "meta": {"tag": [{"system": "urn:healthpilot:export", "code": "r4-aligned-draft", "display": FHIR_FORMAT}]},
+        "meta": {"tag": [{"system": "urn:mydoctor:export", "code": "r4-aligned-draft", "display": FHIR_FORMAT}]},
         "total": len(entries),
         "entry": entries,
     }

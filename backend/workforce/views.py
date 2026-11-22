@@ -1,6 +1,3 @@
-import secrets
-from datetime import timedelta
-
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Count, Q
@@ -13,10 +10,9 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import DoctorProfile, PatientProfile, ProfileStatus, StaffProfile
-from accounts.permissions import IsRole, request_role
+from accounts.permissions import IsRole
 from accounts.roles import (
     APPOINTMENT_VIEW_ROLES,
-    BOOKABLE_PROVIDER_ROLES,
     CLINICAL_ROLES,
     FACILITY_MANAGEMENT_ROLES,
     FACILITY_OPERATIONS_ROLES,
@@ -57,13 +53,13 @@ VISIT_ROLES = list(CLINICAL_ROLES | FRONT_DESK_ROLES | FACILITY_MANAGEMENT_ROLES
 def _organization_or_error(request):
     org_id = request.query_params.get("organization") or request.data.get("organization")
     organization = organization_for_user(request.user, org_id)
-    if request_role(request) == "admin" and org_id:
+    if request.user.role == "admin" and org_id:
         organization = Organization.objects.filter(pk=org_id).first()
     return organization
 
 
 def _verified_clinician_required(request):
-    if request_role(request) in PROFESSIONAL_ROLES and not request.user.is_verified:
+    if request.user.role in PROFESSIONAL_ROLES and not request.user.is_verified:
         return Response(
             {"detail": "Your professional licence must be verified before clinical documentation is allowed."},
             status=403,
@@ -152,7 +148,7 @@ class StaffListInviteView(APIView):
             from django.core.mail import send_mail
 
             send_mail(
-                subject=f"Invitation to join {organization.legal_name} on HealthPilot",
+                subject=f"Invitation to join {organization.legal_name} on MyDoctor",
                 message=f"You have been invited as {invitation.get_role_display() if hasattr(invitation, 'get_role_display') else invitation.role}. Invitation token: {invitation.token}",
                 from_email=None,
                 recipient_list=[invitation.email],
@@ -264,14 +260,14 @@ class InvitationDetailAcceptView(APIView):
                 f"Welcome to {invitation.organization.legal_name}",
                 "Your facility workspace is ready." if not professional else "Your workspace is ready. Clinical or professional actions remain limited until your licence is verified.",
                 kind="account",
-                action_url=portal_path_for_role(invitation.role),
+                action_url=portal_path_for_role(user.role),
             )
         except Exception:
             pass
         refresh = RefreshToken.for_user(user)
         return Response(
             {
-                "user": {"id": user.id, "email": user.email, "registration_role": user.role, "active_role": invitation.role, "is_verified": user.is_verified},
+                "user": {"id": user.id, "email": user.email, "role": user.role, "is_verified": user.is_verified},
                 "tokens": {"access": str(refresh.access_token), "refresh": str(refresh)},
             },
             status=201,
@@ -327,7 +323,8 @@ class PatientSearchCreateView(APIView):
         email = User.objects.normalize_email(request.data["email"])
         if User.objects.filter(email__iexact=email).exists():
             return Response({"detail": "A user with this email already exists."}, status=409)
-        temporary_password = secrets.token_urlsafe(10)[:14]
+        from django.utils.crypto import get_random_string
+        temporary_password = get_random_string(20)
         patient = User.objects.create_user(
             email=email,
             password=temporary_password,
@@ -360,15 +357,19 @@ class VisitListCreateView(APIView):
         qs = PatientVisit.objects.filter(organization=organization).select_related(
             "patient", "assigned_doctor", "assigned_nurse", "organization"
         )
+        from django.db.models import Prefetch
+        from services.models import LabOrder
+
+        qs = qs.prefetch_related(Prefetch("lab_orders", queryset=LabOrder.objects.select_related("lab")))
         status_value = request.query_params.get("status")
         date_value = request.query_params.get("date")
         if status_value:
             qs = qs.filter(status=status_value)
         if date_value:
             qs = qs.filter(checked_in_at__date=date_value)
-        if request_role(request) in NURSING_ROLES:
+        if request.user.role == "nurse":
             qs = qs.filter(Q(assigned_nurse=request.user) | Q(assigned_nurse__isnull=True))
-        elif request_role(request) in BOOKABLE_PROVIDER_ROLES:
+        elif request.user.role == "doctor":
             qs = qs.filter(Q(assigned_doctor=request.user) | Q(assigned_doctor__isnull=True))
         return Response(PatientVisitSerializer(qs, many=True).data)
 
@@ -412,59 +413,134 @@ class VisitActionView(APIView):
     permission_classes = [IsRole]
     allowed_roles = VISIT_ROLES
 
-    def post(self, request, pk):
-        visit = get_object_or_404(PatientVisit.objects.select_related("organization", "patient"), pk=pk)
-        organization = organization_for_user(request.user, visit.organization_id)
-        if request_role(request) != "admin" and organization is None:
+    assignment_roles = FRONT_DESK_ROLES | FACILITY_MANAGEMENT_ROLES | {"admin", "hospital"}
+
+    def eligible_assignees(self, visit):
+        from operations.access import organizations
+        from registry.models import PractitionerRole
+
+        staff = StaffMembership.objects.filter(organization=visit.organization, status="active").values("user_id")
+        practitioners = PractitionerRole.objects.filter(organization=visit.organization, active=True).values("practitioner_id")
+        candidates = User.objects.filter(
+            Q(pk__in=staff) | Q(pk__in=practitioners),
+            is_active=True, is_verified=True, role__in=CLINICAL_ROLES,
+        ).order_by("first_name", "last_name", "pk")
+        return [user for user in candidates if organizations(user).filter(pk=visit.organization_id).exists()]
+
+    def get(self, request, pk):
+        if request.user.role not in self.assignment_roles:
+            return Response({"detail": "This role cannot assign care-team members."}, status=403)
+        visit = get_object_or_404(PatientVisit.objects.select_related("organization"), pk=pk)
+        if request.user.role != "admin" and organization_for_user(request.user, visit.organization_id) is None:
             return Response({"detail": "This visit is outside your organization."}, status=403)
-        status_value = request.data.get("status")
+        return Response([
+            {"id": user.pk, "name": user.display_name, "role": user.role}
+            for user in self.eligible_assignees(visit)
+        ])
+
+    @transaction.atomic
+    def post(self, request, pk):
+        visit = get_object_or_404(PatientVisit.objects.select_for_update().select_related("organization", "patient"), pk=pk)
+        organization = organization_for_user(request.user, visit.organization_id)
+        if request.user.role != "admin" and organization is None:
+            return Response({"detail": "This visit is outside your organization."}, status=403)
+        if request.data.get("action") == "lab_arrival":
+            from services.models import LabOrder
+
+            if request.user.role not in FRONT_DESK_ROLES | FACILITY_MANAGEMENT_ROLES | {"hospital", "admin"}:
+                return Response({"detail": "This role cannot record a front-desk handoff."}, status=403)
+            order = get_object_or_404(LabOrder.objects.select_for_update(), pk=request.data.get("order"), visit=visit)
+            if order.arrived_at is None:
+                if visit.status in {PatientVisit.Status.COMPLETED, PatientVisit.Status.CANCELLED} or order.status not in {
+                    LabOrder.Status.BOOKED, LabOrder.Status.READY_FOR_COLLECTION,
+                }:
+                    return Response({"detail": "This order is not awaiting check-in."}, status=409)
+                order.arrived_at = timezone.now()
+                order.save(update_fields=["arrived_at", "updated_at"])
+                audit_workforce(request, "visit.laboratory.arrived", order, patient=visit.patient)
+            return Response(PatientVisitSerializer(visit).data)
+        if request.data.get("action") == "resume_after_lab":
+            if request.user.role != "doctor" or not request.user.is_verified or visit.assigned_doctor_id != request.user.pk:
+                return Response({"detail": "Only the assigned doctor can resume this consultation."}, status=403)
+            if visit.status == PatientVisit.Status.IN_CONSULTATION:
+                return Response(PatientVisitSerializer(visit).data)
+            if visit.status != PatientVisit.Status.LABORATORY or not visit.lab_orders.filter(result_released=True).exists():
+                return Response({"detail": "A released laboratory result is required."}, status=409)
+            visit.status = PatientVisit.Status.IN_CONSULTATION
+            visit.save(update_fields=["status", "updated_at"])
+            audit_workforce(request, "visit.consultation_resumed_after_lab", visit, patient=visit.patient)
+            return Response(PatientVisitSerializer(visit).data)
+        assignment_only = request.data.get("action") == "assign_care_team"
+        status_value = visit.status if assignment_only else request.data.get("status")
+        if assignment_only and request.user.role not in self.assignment_roles:
+            return Response({"detail": "This role cannot assign care-team members."}, status=403)
+        if assignment_only and visit.status in {PatientVisit.Status.COMPLETED, PatientVisit.Status.CANCELLED}:
+            return Response({"detail": "A closed visit cannot be reassigned."}, status=409)
         if status_value not in PatientVisit.Status.values:
             return Response({"detail": "Invalid visit status."}, status=400)
-        front_desk_statuses = {
-            PatientVisit.Status.REGISTERED, PatientVisit.Status.WAITING_TRIAGE,
-            PatientVisit.Status.CANCELLED,
+        allowed_statuses = {
+            "receptionist": {
+                PatientVisit.Status.REGISTERED,
+                PatientVisit.Status.WAITING_TRIAGE,
+                PatientVisit.Status.CANCELLED,
+            },
+            "records_officer": {
+                PatientVisit.Status.REGISTERED,
+                PatientVisit.Status.WAITING_TRIAGE,
+                PatientVisit.Status.CANCELLED,
+            },
+            "nurse": {
+                PatientVisit.Status.TRIAGED,
+                PatientVisit.Status.WAITING_CLINICIAN,
+                PatientVisit.Status.LABORATORY,
+                PatientVisit.Status.PHARMACY,
+                PatientVisit.Status.BILLING,
+                PatientVisit.Status.COMPLETED,
+            },
+            "doctor": {
+                PatientVisit.Status.IN_CONSULTATION,
+                PatientVisit.Status.LABORATORY,
+                PatientVisit.Status.PHARMACY,
+                PatientVisit.Status.BILLING,
+                PatientVisit.Status.COMPLETED,
+            },
+            "lab_technician": {
+                PatientVisit.Status.LABORATORY,
+                PatientVisit.Status.WAITING_CLINICIAN,
+                PatientVisit.Status.BILLING,
+            },
+            "pharmacist": {
+                PatientVisit.Status.PHARMACY,
+                PatientVisit.Status.BILLING,
+                PatientVisit.Status.COMPLETED,
+            },
+            "cashier": {PatientVisit.Status.BILLING, PatientVisit.Status.COMPLETED},
         }
-        nursing_statuses = {
-            PatientVisit.Status.TRIAGED, PatientVisit.Status.WAITING_CLINICIAN,
-            PatientVisit.Status.LABORATORY, PatientVisit.Status.PHARMACY,
-            PatientVisit.Status.BILLING, PatientVisit.Status.COMPLETED,
-        }
-        clinician_statuses = {
-            PatientVisit.Status.IN_CONSULTATION, PatientVisit.Status.LABORATORY,
-            PatientVisit.Status.PHARMACY, PatientVisit.Status.BILLING,
-            PatientVisit.Status.COMPLETED,
-        }
-        if request_role(request) in FRONT_DESK_ROLES:
-            allowed = front_desk_statuses
-        elif request_role(request) in NURSING_ROLES:
-            allowed = nursing_statuses
-        elif request_role(request) in CLINICAL_ROLES:
-            allowed = clinician_statuses
-        elif request_role(request) == "lab_technician":
-            allowed = {PatientVisit.Status.LABORATORY, PatientVisit.Status.WAITING_CLINICIAN, PatientVisit.Status.BILLING}
-        elif request_role(request) == "pharmacist":
-            allowed = {PatientVisit.Status.PHARMACY, PatientVisit.Status.BILLING, PatientVisit.Status.COMPLETED}
-        elif request_role(request) in {"cashier", "accountant"}:
-            allowed = {PatientVisit.Status.BILLING, PatientVisit.Status.COMPLETED}
-        else:
-            allowed = set()
-        if request_role(request) not in {"admin", "hospital", "facility_manager", "medical_director"} and status_value not in allowed:
-            return Response(
-                {"detail": "This visit transition is not permitted for your role."},
-                status=403,
-            )
-        assignment_roles = {"admin", "hospital", "facility_manager", "receptionist"}
-        if ({"assigned_doctor", "assigned_nurse"} & set(request.data.keys())) and request_role(request) not in assignment_roles:
+        if not assignment_only and request.user.role not in {"admin", "hospital", "facility_manager"}:
+            if status_value not in allowed_statuses.get(request.user.role, set()):
+                return Response(
+                    {"detail": "This visit transition is not permitted for your role."},
+                    status=403,
+                )
+        if ({"assigned_doctor", "assigned_nurse"} & set(request.data.keys())) and request.user.role not in self.assignment_roles:
             return Response({"detail": "Your role cannot assign care-team members."}, status=403)
+        eligible = None
+        for role in ("doctor", "nurse"):
+            field = f"assigned_{role}"
+            if field not in request.data:
+                continue
+            selection = request.data[field]
+            if selection:
+                if eligible is None:
+                    eligible = self.eligible_assignees(visit)
+                if not any(user.role == role and str(user.pk) == str(selection) for user in eligible):
+                    return Response({"detail": f"Select a verified {role} at this facility."}, status=400)
+            setattr(visit, f"{field}_id", selection or None)
         visit.status = status_value
-        if "assigned_doctor" in request.data:
-            visit.assigned_doctor_id = request.data.get("assigned_doctor") or None
-        if "assigned_nurse" in request.data:
-            visit.assigned_nurse_id = request.data.get("assigned_nurse") or None
         if status_value == PatientVisit.Status.COMPLETED:
             visit.checked_out_at = timezone.now()
         visit.save()
-        audit_workforce(request, f"visit.{status_value}", visit, patient=visit.patient)
+        audit_workforce(request, "visit.care_team_assigned" if assignment_only else f"visit.{status_value}", visit, patient=visit.patient)
         return Response(PatientVisitSerializer(visit).data)
 
 
@@ -485,7 +561,7 @@ class TriageListCreateView(APIView):
         if denied:
             return denied
         visit = get_object_or_404(PatientVisit, pk=request.data.get("visit"))
-        if request_role(request) != "admin" and organization_for_user(request.user, visit.organization_id) is None:
+        if request.user.role != "admin" and organization_for_user(request.user, visit.organization_id) is None:
             return Response({"detail": "This visit is outside your organization."}, status=403)
         serializer = TriageRecordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -493,7 +569,7 @@ class TriageListCreateView(APIView):
             visit=visit,
             defaults={**serializer.validated_data, "nurse": request.user},
         )
-        visit.assigned_nurse = request.user if request_role(request) == "nurse" else visit.assigned_nurse
+        visit.assigned_nurse = request.user if request.user.role == "nurse" else visit.assigned_nurse
         visit.status = PatientVisit.Status.WAITING_CLINICIAN
         visit.priority = PatientVisit.Priority.EMERGENCY if triage.level == TriageRecord.Level.RED else (
             PatientVisit.Priority.URGENT if triage.level in {TriageRecord.Level.ORANGE, TriageRecord.Level.YELLOW} else PatientVisit.Priority.ROUTINE
@@ -522,6 +598,10 @@ class NursingNoteListCreateView(APIView):
         organization = _organization_or_error(request)
         if organization:
             qs = qs.filter(visit__organization=organization)
+        elif request.user.role != "admin" or request.query_params.get("organization"):
+            return Response({"detail": "No organization is in scope."}, status=403)
+        if request.query_params.get("note_type"):
+            qs = qs.filter(note_type=request.query_params["note_type"])
         return Response(NursingNoteSerializer(qs, many=True).data)
 
     def post(self, request):
@@ -529,7 +609,7 @@ class NursingNoteListCreateView(APIView):
         if denied:
             return denied
         visit = get_object_or_404(PatientVisit, pk=request.data.get("visit"))
-        if request_role(request) != "admin" and organization_for_user(request.user, visit.organization_id) is None:
+        if request.user.role != "admin" and organization_for_user(request.user, visit.organization_id) is None:
             return Response({"detail": "This visit is outside your organization."}, status=403)
         serializer = NursingNoteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -557,7 +637,7 @@ class MedicationAdministrationListCreateView(APIView):
         if denied:
             return denied
         visit = get_object_or_404(PatientVisit, pk=request.data.get("visit"))
-        if request_role(request) != "admin" and organization_for_user(request.user, visit.organization_id) is None:
+        if request.user.role != "admin" and organization_for_user(request.user, visit.organization_id) is None:
             return Response({"detail": "This visit is outside your organization."}, status=403)
         serializer = MedicationAdministrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -592,64 +672,5 @@ class OperationsSummaryView(APIView):
                     .annotate(count=Count("id"))
                     .order_by("role")
                 ),
-            }
-        )
-
-
-class TeamScheduleView(APIView):
-    """Read-only cross-provider schedule: any staff member can see upcoming
-    appointments for every provider in their organization."""
-
-    permission_classes = [IsRole]
-    allowed_roles = VISIT_ROLES
-
-    def get(self, request):
-        from appointments.models import Appointment
-
-        organization = _organization_or_error(request)
-        if not organization:
-            return Response({"detail": "No organization is in scope."}, status=400)
-        days = min(int(request.query_params.get("days", 14) or 14), 60)
-        horizon = timezone.localdate() + timedelta(days=days)
-        appointments = (
-            Appointment.objects.filter(
-                doctor__staff_memberships__organization=organization,
-                date__gte=timezone.localdate(),
-                date__lte=horizon,
-            )
-            .exclude(status__in=[Appointment.Status.CANCELLED, Appointment.Status.MISSED])
-            .select_related("doctor", "patient")
-            .order_by("date", "start_time")
-            .distinct()
-        )
-        providers = {}
-        for appointment in appointments:
-            entry = providers.setdefault(
-                appointment.doctor_id,
-                {
-                    "provider_id": appointment.doctor_id,
-                    "provider_name": appointment.doctor.display_name,
-                    "role": appointment.doctor.role,
-                    "appointments": [],
-                },
-            )
-            entry["appointments"].append(
-                {
-                    "id": appointment.id,
-                    "date": appointment.date.isoformat(),
-                    "start_time": appointment.start_time.strftime("%H:%M"),
-                    "end_time": appointment.end_time.strftime("%H:%M"),
-                    "patient_name": appointment.patient.display_name,
-                    "type": appointment.type,
-                    "status": appointment.status,
-                    "reason": appointment.reason,
-                }
-            )
-        return Response(
-            {
-                "organization": organization.legal_name,
-                "from": timezone.localdate().isoformat(),
-                "to": horizon.isoformat(),
-                "providers": sorted(providers.values(), key=lambda row: row["provider_name"]),
             }
         )

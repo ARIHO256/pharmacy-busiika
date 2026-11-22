@@ -1,3 +1,4 @@
+import OrderReceipt from '../../pharmacy/OrderReceipt'
 import React, { useCallback, useEffect, useState } from 'react'
 import { servicesApi } from '../../../api/endpoints'
 import { Badge, Button, Card, Input, Modal, Select, Spinner, Table } from '../../../components/ui'
@@ -16,6 +17,7 @@ export default function PharmacyStore() {
   const [address, setAddress] = useState('')
   const [placing, setPlacing] = useState(false)
   const [orders, setOrders] = useState(null)
+  const [receiptOrder, setReceiptOrder] = useState(null)
   const [notice, setNotice] = useState(null) // {type, text}
   const [qtys, setQtys] = useState({}) // medicineId -> qty
 
@@ -155,7 +157,7 @@ export default function PharmacyStore() {
                 <option value="">All pharmacies</option>
                 {pharmacies.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.org_name}
+                    {p.org_name}{p.parent_facility_name ? ` · ${p.parent_facility_name} (${p.parent_facility_type})` : ''}
                   </option>
                 ))}
               </Select>
@@ -178,7 +180,7 @@ export default function PharmacyStore() {
                     <img
                       src={m.image}
                       alt={m.name}
-                      className="w-full h-44 object-contain rounded-lg mb-3 bg-slate-50 border border-slate-100"
+                      className="w-full h-32 object-cover rounded-lg mb-3"
                     />
                   )}
                   <div className="flex items-start justify-between gap-2">
@@ -204,15 +206,14 @@ export default function PharmacyStore() {
                       max={m.stock}
                       value={qtys[m.id] || 1}
                       onChange={(e) => setQtys({ ...qtys, [m.id]: e.target.value })}
-                      aria-label={`Quantity of ${m.name}`}
                       className="w-16 px-2 py-1.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                     />
                     <Button
                       className="flex-1"
-                      disabled={m.stock <= 0}
+                      disabled={!m.available_online}
                       onClick={() => addToCart(m)}
                     >
-                      Add to cart
+                      {m.available_online ? 'Add to cart' : ['prescription', 'controlled'].includes(m.sale_type) ? 'Prescription required' : 'Unavailable online'}
                     </Button>
                   </div>
                 </Card>
@@ -239,13 +240,16 @@ export default function PharmacyStore() {
                       <span className="text-slate-500"> · {o.pharmacy_name}</span>
                     </div>
                     <div className="flex items-center gap-3">
-                      <Badge color={statusColor(o.status)}>{o.status}</Badge>
+                      <Badge color={statusColor(o.status)}>{({ ready: 'Ready for pickup', dispatched: 'Out for delivery', delivered: o.delivery ? 'Delivered' : 'Collected' })[o.status] || o.status}</Badge>
                       <span className="font-bold text-primary-600 text-sm">{ugx(o.total)}</span>
                     </div>
                   </div>
                   <div className="text-xs text-slate-400 mt-1">
                     {fmtDT(o.created_at)} · {o.delivery ? `Delivery to ${o.address}` : 'Pickup'}
+                    {o.handed_over_at && ` · Handover recorded ${fmtDT(o.handed_over_at)}`}
                   </div>
+                  {o.payment_recorded && <Button variant="outline" className="mt-2"
+                    onClick={() => setReceiptOrder(o)}>Print receipt</Button>}
                   <Table
                     empty="No items"
                     columns={[
@@ -262,6 +266,8 @@ export default function PharmacyStore() {
           )}
         </Card>
       )}
+
+      {receiptOrder && <OrderReceipt order={receiptOrder} onClose={() => setReceiptOrder(null)} />}
 
       {/* cart drawer */}
       <Modal open={cartOpen} onClose={() => setCartOpen(false)} title="Your Cart">

@@ -325,6 +325,7 @@ class NursingNote(models.Model):
     )
     note_type = models.CharField(max_length=20, choices=Type.choices, default=Type.PROGRESS)
     note = models.TextField()
+    handover = models.JSONField(default=dict, blank=True)
     recorded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -364,105 +365,3 @@ class MedicationAdministration(models.Model):
 
     def __str__(self):
         return f"{self.medication} — {self.visit.visit_number}"
-
-
-class PermissionDefinition(models.Model):
-    """Stable action code used by both built-in and organization-defined roles."""
-
-    code = models.CharField(max_length=120, unique=True)
-    name = models.CharField(max_length=180)
-    module = models.CharField(max_length=80)
-    description = models.TextField(blank=True, default="")
-    sensitive = models.BooleanField(default=False)
-    active = models.BooleanField(default=True)
-
-    class Meta:
-        ordering = ["module", "name"]
-
-    def __str__(self):
-        return self.code
-
-
-class FacilityRole(models.Model):
-    organization = models.ForeignKey(
-        "registry.Organization", on_delete=models.CASCADE, related_name="custom_roles"
-    )
-    name = models.CharField(max_length=120)
-    code = models.SlugField(max_length=80)
-    description = models.TextField(blank=True, default="")
-    active = models.BooleanField(default=True)
-    is_system = models.BooleanField(default=False)
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="created_facility_roles",
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    permissions = models.ManyToManyField(
-        PermissionDefinition,
-        through="FacilityRolePermission",
-        related_name="facility_roles",
-    )
-
-    class Meta:
-        ordering = ["organization", "name"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["organization", "code"], name="unique_facility_role_code"
-            )
-        ]
-
-    def __str__(self):
-        return f"{self.organization}: {self.name}"
-
-
-class FacilityRolePermission(models.Model):
-    role = models.ForeignKey(FacilityRole, on_delete=models.CASCADE, related_name="permission_links")
-    permission = models.ForeignKey(PermissionDefinition, on_delete=models.CASCADE, related_name="role_links")
-    granted_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="granted_facility_permissions",
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(fields=["role", "permission"], name="unique_permission_per_facility_role")
-        ]
-
-
-class MembershipRoleAssignment(models.Model):
-    membership = models.ForeignKey(
-        StaffMembership, on_delete=models.CASCADE, related_name="custom_role_assignments"
-    )
-    role = models.ForeignKey(
-        FacilityRole, on_delete=models.CASCADE, related_name="membership_assignments"
-    )
-    assigned_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="assigned_custom_roles",
-    )
-    valid_from = models.DateTimeField(default=timezone.now)
-    valid_until = models.DateTimeField(null=True, blank=True)
-    active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(fields=["membership", "role"], name="unique_custom_role_assignment")
-        ]
-
-    def clean(self):
-        if self.membership_id and self.role_id and self.membership.organization_id != self.role.organization_id:
-            raise ValidationError({"role": "Role belongs to another organization."})
-        if self.valid_until and self.valid_until <= self.valid_from:
-            raise ValidationError({"valid_until": "Expiry must be after the assignment start."})
