@@ -40,6 +40,7 @@ class WorkflowEvent(models.Model):
 
 
 class Admission(OrganizationRecord):
+    visit = models.ForeignKey("workforce.PatientVisit", on_delete=models.PROTECT, null=True, blank=True, related_name="admissions")
     patient = models.ForeignKey(USER, on_delete=models.PROTECT, related_name="admissions")
     attending_doctor = models.ForeignKey(USER, on_delete=models.PROTECT, related_name="inpatients")
     bed = models.ForeignKey("services.Bed", on_delete=models.PROTECT, null=True, blank=True)

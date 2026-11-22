@@ -1,4 +1,5 @@
 from django.urls import path
+from .handoffs import HandoffListCreate, HandoffTransition, ReferralFacilityList, VisitPrescription
 
 from .views import (
     DepartmentListCreateView,
@@ -7,6 +8,7 @@ from .views import (
     NursingNoteListCreateView,
     OperationsSummaryView,
     PatientSearchCreateView,
+    PharmacyStaffRoleView,
     StaffListInviteView,
     StaffMembershipStatusView,
     TriageListCreateView,
@@ -15,8 +17,13 @@ from .views import (
 )
 
 urlpatterns = [
+    path("visits/<int:pk>/prescription/", VisitPrescription.as_view(), name="workforce-visit-prescription"),
+    path("handoff-referral-facilities/", ReferralFacilityList.as_view(), name="workforce-referral-facilities"),
+    path("handoffs/", HandoffListCreate.as_view(), name="workforce-handoffs"),
+    path("handoffs/<int:pk>/transition/", HandoffTransition.as_view(), name="workforce-handoff-transition"),
     path("departments/", DepartmentListCreateView.as_view(), name="workforce-departments"),
     path("staff/", StaffListInviteView.as_view(), name="workforce-staff"),
+    path("staff/<int:pk>/pharmacy-role/", PharmacyStaffRoleView.as_view(), name="workforce-pharmacy-staff-role"),
     path("staff/<int:pk>/status/", StaffMembershipStatusView.as_view(), name="workforce-staff-status"),
     path("invitations/<uuid:token>/", InvitationDetailAcceptView.as_view(), name="workforce-invitation"),
     path("patients/", PatientSearchCreateView.as_view(), name="workforce-patients"),

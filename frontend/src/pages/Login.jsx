@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth, ROLE_HOME } from '../auth/AuthContext'
-import { Button, Input } from '../components/ui'
+import { Alert, Button, Input } from '../components/ui'
 import HealthIcon from '../components/icons/HealthIcon'
 
 const promises = [
@@ -10,7 +10,7 @@ const promises = [
   ['heart', 'Health record', 'Your longitudinal record, consent and history'],
 ]
 
-export default function Login({ product, destination = (user) => ROLE_HOME[user.role] || "/patient" }) {
+export default function Login({ pharmacy = false, destination = (user) => ROLE_HOME[user.role] || '/patient' }) {
   const { login } = useAuth()
   const navigate = useNavigate()
   const [form, setForm] = useState({ email: '', password: '' })
@@ -23,7 +23,7 @@ export default function Login({ product, destination = (user) => ROLE_HOME[user.
     setError('')
     try {
       const user = await login(form.email, form.password)
-      navigate(destination(user), { replace: Boolean(product) })
+      navigate(destination(user), { replace: pharmacy })
     } catch {
       setError('Invalid email or password')
     } finally {
@@ -31,16 +31,37 @@ export default function Login({ product, destination = (user) => ROLE_HOME[user.
     }
   }
 
+  if (pharmacy) return <main className="pharmacy-sign-in">
+    <div className="pharmacy-sign-in-content">
+      <div className="pharmacy-wordmark">
+        <span aria-hidden="true"><HealthIcon name="pill" size={20} /></span>
+        <strong>MyDoctor Pharmacy</strong>
+      </div>
+      <section className="pharmacy-sign-in-panel">
+        <h1>Sign in</h1>
+        <form className="space-y-4" onSubmit={submit}>
+          <Input label="Email address" type="email" autoComplete="email" required value={form.email}
+            onChange={(event) => setForm({ ...form, email: event.target.value })} />
+          <Input label="Password" type="password" autoComplete="current-password" required value={form.password}
+            onChange={(event) => setForm({ ...form, password: event.target.value })} />
+          {error && <Alert tone="danger">{error}</Alert>}
+          <Button type="submit" className="w-full" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</Button>
+        </form>
+        <p className="pharmacy-sign-in-register"><Link to="/register">Create a buyer account</Link> · <Link to="/onboard-pharmacy">Register a pharmacy</Link></p>
+      </section>
+    </div>
+  </main>
+
   return (
     <main className="healthos-auth-shell">
       <section className="healthos-auth-story">
-        <Link to="/" className="healthos-auth-brand"><span><HealthIcon name="heart" size={19}/></span><div><strong>MyDoctor</strong><small>{product ? 'Pharmacy' : 'Connected Healthcare OS'}</small></div></Link>
+        <Link to="/" className="healthos-auth-brand"><span><HealthIcon name="heart" size={19}/></span><div><strong>MyDoctor</strong><small>Connected Healthcare OS</small></div></Link>
         <div className="healthos-auth-copy">
-          <span className="healthos-auth-kicker">{product?.kicker || 'Patients · Doctors · Connected care'}</span>
-          <h1>{product?.headline[0] || 'Every care journey.'}<br/><em>{product?.headline[1] || 'One secure workspace.'}</em></h1>
-          <p>{product?.description || 'Sign in to appointments, consultations, prescriptions, diagnostics, payments and your complete health record.'}</p>
+          <span className="healthos-auth-kicker">Patients · Doctors · Connected care</span>
+          <h1>Every care journey.<br/><em>One secure workspace.</em></h1>
+          <p>Sign in to appointments, consultations, prescriptions, diagnostics, payments and your complete health record.</p>
           <div className="healthos-auth-promises">
-            {(product?.features || promises).map(([icon, title, text]) => (
+            {promises.map(([icon, title, text]) => (
               <article key={title}><span><HealthIcon name={icon} size={18}/></span><div><strong>{title}</strong><small>{text}</small></div></article>
             ))}
           </div>
@@ -57,12 +78,12 @@ export default function Login({ product, destination = (user) => ROLE_HOME[user.
           <form onSubmit={submit} className="space-y-4">
             <Input label="Email address" type="email" autoComplete="email" required value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@example.com" />
             <Input label="Password" type="password" autoComplete="current-password" required value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} placeholder="Enter your password" />
-            {!product && <div className="healthos-auth-options"><label><input type="checkbox"/> Keep me signed in</label><button type="button">Forgot password?</button></div>}
+            <div className="healthos-auth-options"><label><input type="checkbox"/> Keep me signed in</label><button type="button">Forgot password?</button></div>
             {error && <div className="healthos-auth-error"><HealthIcon name="alert" size={17}/>{error}</div>}
             <Button type="submit" className="w-full" disabled={busy}>{busy ? 'Signing in…' : 'Sign in securely'}<HealthIcon name="arrow" size={17}/></Button>
           </form>
-          <div className="healthos-auth-divider"><span>{product ? 'New pharmacy owner?' : 'New to MyDoctor?'}</span></div>
-          <Link to="/register" className="healthos-auth-secondary">{product ? 'Register your pharmacy' : 'Create an account'} <HealthIcon name="arrow" size={16}/></Link>
+          <div className="healthos-auth-divider"><span>New to MyDoctor?</span></div>
+          <Link to="/register" className="healthos-auth-secondary">Create an account <HealthIcon name="arrow" size={16}/></Link>
           <p className="healthos-auth-legal">By continuing, you agree to the platform terms, privacy notice and appropriate healthcare-data use.</p>
         </div>
       </section>

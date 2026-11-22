@@ -93,6 +93,7 @@ class ProcedureSerializer(serializer_for(m.ProcedureBooking, ("status", "notes")
 class BatchSerializer(serializer_for(m.MedicineBatch, ("quantity", "status"))):
     medicine_name = serializers.CharField(source="medicine.name", read_only=True)
     opening_quantity = serializers.IntegerField(min_value=0, max_value=2147483647, required=False, write_only=True)
+    opening_packs = serializers.IntegerField(min_value=0, max_value=2147483647, required=False, write_only=True)
     opening_witness = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(is_active=True), required=False, write_only=True)
 
     def validate(self, attrs):
@@ -104,7 +105,7 @@ class BatchSerializer(serializer_for(m.MedicineBatch, ("quantity", "status"))):
             raise serializers.ValidationError("Supplier belongs to a different pharmacy.")
         if attrs["expires_on"] <= timezone.localdate():
             raise serializers.ValidationError("New stock must have a future expiry date.")
-        if attrs.get("opening_witness") and not (attrs.get("opening_quantity") and attrs.get("controlled")):
+        if attrs.get("opening_witness") and not ((attrs.get("opening_quantity") or attrs.get("opening_packs")) and attrs.get("controlled")):
             raise serializers.ValidationError("A witness is only needed when recording opening stock for a controlled batch.")
         low, high = attrs.get("min_temperature"), attrs.get("max_temperature")
         if (low is None) != (high is None) or low is not None and low >= high:
@@ -113,6 +114,7 @@ class BatchSerializer(serializer_for(m.MedicineBatch, ("quantity", "status"))):
 
 
 class MovementInput(StrictSerializer):
+    packs = serializers.BooleanField(required=False, default=False)
     prescription_item = serializers.PrimaryKeyRelatedField(queryset=PrescriptionItem.objects.all(), required=False)
     quantity = serializers.IntegerField()
     kind = serializers.ChoiceField(choices=["received", "dispensed", "returned", "adjusted", "destroyed"])
@@ -136,6 +138,8 @@ class BatchAction(StrictSerializer):
 class RouteSerializer(serializer_for(m.ReferralRoute, ("outcome", "version", "assigned_to", "scheduled_at"))):
     status = serializers.CharField(source="referral.status", read_only=True)
     patient_name = serializers.CharField(source="referral.patient.display_name", read_only=True)
+    specialty = serializers.CharField(source="referral.target_specialty", read_only=True)
+    reason = serializers.CharField(source="referral.reason", read_only=True)
 
     def validate(self, attrs):
         attrs = super().validate(attrs)

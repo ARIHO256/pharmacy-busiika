@@ -30,6 +30,7 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
 
 class StaffMembershipSerializer(serializers.ModelSerializer):
+    custom_role_name = serializers.CharField(source="custom_role.name", read_only=True, default=None)
     user_name = serializers.SerializerMethodField()
     user_email = serializers.EmailField(source="user.email", read_only=True)
     user_phone = serializers.CharField(source="user.phone", read_only=True)
@@ -41,7 +42,7 @@ class StaffMembershipSerializer(serializers.ModelSerializer):
         model = StaffMembership
         fields = [
             "id", "user", "user_name", "user_email", "user_phone", "organization",
-            "organization_name", "department", "department_name", "role", "job_title",
+            "organization_name", "department", "department_name", "role", "job_title", "custom_role", "custom_role_name",
             "employee_number", "status", "is_primary", "starts_on", "ends_on",
             "verification_status", "created_at", "updated_at",
         ]
@@ -57,6 +58,7 @@ class StaffMembershipSerializer(serializers.ModelSerializer):
 
 
 class StaffInvitationSerializer(serializers.ModelSerializer):
+    custom_role_name = serializers.CharField(source="custom_role.name", read_only=True, default=None)
     organization_name = serializers.CharField(source="organization.legal_name", read_only=True)
     department_name = serializers.CharField(source="department.name", read_only=True)
     invitation_url = serializers.SerializerMethodField()
@@ -66,7 +68,7 @@ class StaffInvitationSerializer(serializers.ModelSerializer):
         fields = [
             "id", "token", "organization", "organization_name", "department", "department_name",
             "email", "phone", "first_name", "last_name", "role", "job_title",
-            "employee_number", "status", "expires_at", "accepted_at", "created_at",
+            "employee_number", "custom_role", "custom_role_name", "status", "expires_at", "accepted_at", "created_at",
             "invitation_url",
         ]
         read_only_fields = [
@@ -154,6 +156,14 @@ class InvitationAcceptSerializer(serializers.Serializer):
 
 class PatientVisitSerializer(serializers.ModelSerializer):
     laboratory_handoffs = serializers.SerializerMethodField()
+    admission = serializers.SerializerMethodField()
+
+    def get_admission(self, obj):
+        admissions = sorted(obj.admissions.all(), key=lambda row: row.admitted_at, reverse=True)
+        record = next((row for row in admissions if row.status == "admitted"), admissions[0] if admissions else None)
+        if record:
+            return {"id": record.pk, "status": record.status, "bed": str(record.bed) if record.bed else None}
+        return None
 
     def get_laboratory_handoffs(self, obj):
         return [{
@@ -176,7 +186,7 @@ class PatientVisitSerializer(serializers.ModelSerializer):
             "location", "patient", "patient_name", "patient_email", "patient_phone",
             "appointment", "registered_by", "assigned_doctor", "assigned_doctor_name",
             "assigned_nurse", "assigned_nurse_name", "visit_type", "status", "priority",
-            "reason", "triage_level", "checked_in_at", "checked_out_at", "updated_at", "laboratory_handoffs",
+            "reason", "triage_level", "checked_in_at", "checked_out_at", "updated_at", "laboratory_handoffs", "admission",
         ]
         read_only_fields = [
             "visit_number", "queue_number", "organization", "registered_by", "checked_in_at",

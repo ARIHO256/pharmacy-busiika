@@ -19,9 +19,15 @@ def organizations(user):
     roles = PractitionerRole.objects.filter(practitioner=user, active=True).filter(
         Q(start_date__isnull=True) | Q(start_date__lte=today)
     ).filter(Q(end_date__isnull=True) | Q(end_date__gte=today)).values("organization_id")
-    return Organization.objects.filter(active=True, status="verified").filter(
-        Q(owner=user) | Q(pk__in=memberships) | Q(pk__in=roles)
-    ).distinct()
+    verified = Organization.objects.filter(active=True, status="verified")
+    scope = verified.filter(Q(owner=user) | Q(pk__in=memberships) | Q(pk__in=roles))
+    if user.role == "pharmacist" and user.is_verified:
+        from services.views import provider_account_for
+
+        pharmacy = provider_account_for(user, "pharmacy")
+        if pharmacy:
+            scope = scope | verified.filter(owner=pharmacy, organization_type="pharmacy")
+    return scope.distinct()
 
 
 def require_role(user, roles):

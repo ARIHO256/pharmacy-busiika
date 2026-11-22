@@ -1,3 +1,7 @@
+import StockSetup from './StockSetup'
+import { PharmacyAudit, PharmacyFinance } from './OwnerWorkflows'
+import Reports from './Reports'
+import { PharmacySafety, PharmacyTransfers } from './SafetyWorkflows'
 import ManageTaxonomy from './ManageTaxonomy'
 import StaffAccess from './StaffAccess'
 import Counter from './Counter'
@@ -13,6 +17,13 @@ import Suppliers from './Suppliers'
 import { ProviderProfile } from './shared'
 
 export const nav=[
+  { to: '/pharmacy/stock-setup', label: 'Stock Setup & Alerts', icon: 'clipboard', group: 'Inventory' },
+  { to: '/pharmacy/refunds', label: 'Refunds & Voids', icon: 'money', group: 'Sales' },
+  { to: '/pharmacy/credit', label: 'Accounts Receivable', icon: 'money', group: 'Sales' },
+  { to: '/pharmacy/audit', label: 'Audit History', icon: 'audit', group: 'Settings' },
+  { to: '/pharmacy/reports', label: 'Reports', icon: 'analytics', group: 'Sales' },
+  { to: '/pharmacy/safety', label: 'Safety & Returns', icon: 'clipboard', group: 'Safety' },
+  { to: '/pharmacy/transfers', label: 'Branch Transfers', icon: 'truck', group: 'Inventory' },
   { to: '/pharmacy/taxonomy', label: 'Manage Taxonomy', icon: 'settings', group: 'Settings' },
   { to: '/pharmacy/staff', label: 'Staff & Access', icon: 'users', group: 'Settings' },
   { to: '/pharmacy/counter', label: 'New Sale', icon: 'cart', group: 'Sales', roles: ['pharmacy', 'pharmacist', 'cashier'] },
@@ -30,6 +41,13 @@ export const nav=[
 ]
 
 export const routes=[
+  { path: 'stock-setup', element: <StockSetup /> },
+  { path: 'refunds', element: <PharmacyFinance key="refunds" refund /> },
+  { path: 'credit', element: <PharmacyFinance key="credit" /> },
+  { path: 'audit', element: <PharmacyAudit /> },
+  { path: 'reports', element: <Reports /> },
+  { path: 'safety', element: <PharmacySafety /> },
+  { path: 'transfers', element: <PharmacyTransfers /> },
   { path: 'taxonomy', element: <ManageTaxonomy /> },
   { path: 'staff', element: <StaffAccess /> },
   { path: 'counter', element: <Counter /> },

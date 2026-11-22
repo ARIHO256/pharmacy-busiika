@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useAuth } from '../../auth/AuthContext'
 import client from '../../api/client'
 import { servicesApi } from '../../api/endpoints'
 import { Button, Card, Input, Modal, Table } from '../../components/ui'
@@ -8,8 +7,7 @@ import { errMsg, ErrorNote, LoadingOrError, money, useApi } from '../pharmacy/sh
 const emptyForm = { name: '', price: '' }
 
 export default function Services() {
-  const { user } = useAuth()
-  const { data: services, loading, error, reload } = useApi(() => servicesApi.hospitalServices({ hospital: user.id }))
+  const { data: services, loading, error, reload } = useApi(() => servicesApi.hospitalServices())
   const [modal, setModal] = useState(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
@@ -59,7 +57,7 @@ export default function Services() {
 
   return (
     <LoadingOrError loading={loading} error={error}>
-      <Card title="Hospital services" actions={<Button onClick={openAdd}>+ Add service</Button>}>
+      <Card title="Facility services" actions={<Button onClick={openAdd}>+ Add service</Button>}>
         <Table
           empty="No services yet — add your first one."
           columns={[

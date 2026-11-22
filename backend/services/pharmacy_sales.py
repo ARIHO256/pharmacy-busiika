@@ -42,8 +42,8 @@ class OfflinePaymentInput(PaymentDetails):
     amount = serializers.IntegerField(min_value=1)
 
 
-def staff_pharmacy(user):
-    require_role(user, STAFF_ROLES)
+def staff_pharmacy(user, *, roles=STAFF_ROLES):
+    require_role(user, roles)
     account = provider_account_for(user, "pharmacy")
     pharmacy = organizations(user).filter(
         owner_id=getattr(account, "pk", None), organization_type="pharmacy", active=True, status="verified",
@@ -61,9 +61,13 @@ class PharmacySaleReceiptView(APIView):
     def get(self, request, pk):
         scope = {"patient": request.user} if request.user.role == "patient" else {"pharmacy_id": staff_pharmacy(request.user).owner_id}
         order = get_object_or_404(Order, pk=pk, invoice__isnull=False, **scope)
-        receipt = get_object_or_404(Receipt, payment__invoice_id=order.invoice_id, payment__status="confirmed")
+        receipts = Receipt.objects.filter(payment__invoice_id=order.invoice_id,
+                                          payment__status__in=["confirmed", "refunded"]).order_by("-pk")
+        receipt = receipts.first()
+        if not receipt:
+            return Response({"detail": "This order has no recorded payment."}, status=404)
         audit(actor=request.user, action="pharmacy.receipt.viewed", resource=receipt, patient=order.patient,
-              purpose="billing", request=request)
+              purpose="billing", metadata={"pharmacy_id": order.pharmacy_id}, request=request)
         return Response(ReceiptSerializer(receipt).data)
 
     @transaction.atomic
@@ -72,6 +76,8 @@ class PharmacySaleReceiptView(APIView):
         User.objects.select_for_update().get(pk=request.user.pk)
         order = get_object_or_404(Order.objects.select_for_update(), pk=pk, pharmacy_id=pharmacy.owner_id)
         data = validated(OfflinePaymentInput, request)
+        if order.invoice_id and (order.invoice.due_at or order.invoice.status == Invoice.Status.REFUNDED):
+            return Response({"detail": "Use the credit or refund record for this order."}, status=409)
         if order.invoice_id:
             receipt = get_object_or_404(Receipt, payment__invoice_id=order.invoice_id, payment__status="confirmed")
             payment = receipt.payment
@@ -104,7 +110,7 @@ def issue_receipt(request, pharmacy, order, items, data):
     order.save(update_fields=["invoice"])
     _, receipt, _ = confirm_invoice_payment(invoice=invoice, received_by=request.user, **data)
     audit(actor=request.user, action="pharmacy.payment.recorded", resource=receipt, patient=order.patient,
-          purpose="billing", metadata={"order_id": order.pk, "amount": order.total}, request=request)
+          purpose="billing", metadata={"pharmacy_id": pharmacy.owner_id, "order_id": order.pk, "amount": order.total}, request=request)
     return receipt
 
 
@@ -136,7 +142,7 @@ class PharmacyCounterSaleView(APIView):
         if search:
             products = products.filter(name__icontains=search)
         return Response([{
-            "id": medicine.pk, "name": medicine.name, "price": medicine.price, "sale_type": medicine.sale_type,
+            "id": medicine.pk, "name": medicine.name, "price": medicine.price, "sale_type": medicine.sale_type, "unit_label": medicine.unit_label,
             "stock": online_orderable_batches(medicine).filter(organization=pharmacy).aggregate(total=Sum("quantity"))["total"] or 0,
         } for medicine in products[:60]])
 
@@ -180,6 +186,8 @@ class PharmacyCounterSaleView(APIView):
             sale_items.append(OrderItem.objects.create(order=order, medicine=product, name=product.name, price=product.price, qty=quantity))
         payment = {key: values[key] for key in ("amount", "method", "reference")}
         receipt = issue_receipt(request, pharmacy, order, sale_items, payment)
+        audit(actor=request.user, action="pharmacy.counter_sale.created", resource=order, purpose="billing",
+              metadata={"pharmacy_id": pharmacy.owner_id, "total": total}, request=request)
         return Response({"order_id": order.pk, "receipt": ReceiptSerializer(receipt).data}, status=201)
 
 
@@ -222,6 +230,8 @@ class PharmacyShiftView(APIView):
         if CashierShift.objects.filter(organization=pharmacy, cashier=request.user, status="open").exists():
             return Response({"detail": "You already have an open shift."}, status=409)
         shift = CashierShift.objects.create(organization=pharmacy, cashier=request.user, expected_cash=data["opening_float"], **data)
+        audit(actor=request.user, action="pharmacy.shift.opened", resource=shift, purpose="billing",
+              metadata={"pharmacy_id": pharmacy.owner_id, "opening_float": shift.opening_float}, request=request)
         return Response(CashierShiftSerializer(shift).data, status=201)
 
 
@@ -243,4 +253,6 @@ class PharmacyShiftCloseView(APIView):
         shift.status = CashierShift.Status.CLOSED
         shift.closed_at = timezone.now()
         shift.save()
+        audit(actor=request.user, action="pharmacy.shift.closed", resource=shift, purpose="billing",
+              metadata={"pharmacy_id": pharmacy.owner_id, "closing_cash": shift.closing_cash, "variance": shift.variance}, request=request)
         return Response(CashierShiftSerializer(shift).data)

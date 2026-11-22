@@ -39,7 +39,22 @@ class Department(models.Model):
         return f"{self.organization} — {self.name}"
 
 
+class PharmacyCustomRole(models.Model):
+    pharmacy = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    name = models.CharField(max_length=80)
+    base_role = models.CharField(max_length=24)
+    permissions = models.JSONField(default=list)
+
+    class Meta:
+        ordering = ["name", "pk"]
+        constraints = [
+            models.UniqueConstraint(models.functions.Lower("name"), "pharmacy", name="pharmacy_custom_role_unique_name"),
+        ]
+
+
 class StaffMembership(models.Model):
+    custom_role = models.ForeignKey(PharmacyCustomRole, on_delete=models.PROTECT, null=True, blank=True)
+
     class Status(models.TextChoices):
         INVITED = "invited", "Invited"
         ACTIVE = "active", "Active"
@@ -87,8 +102,8 @@ class StaffMembership(models.Model):
             )
         ]
         indexes = [
-            models.Index(fields=["organization", "role", "status"]),
-            models.Index(fields=["user", "status"]),
+            models.Index(fields=["organization", "role", "status"], name="work_member_org_role_idx"),
+            models.Index(fields=["user", "status"], name="work_member_user_stat_idx"),
         ]
 
     def clean(self):
@@ -106,6 +121,8 @@ class StaffMembership(models.Model):
 
 
 class StaffInvitation(models.Model):
+    custom_role = models.ForeignKey(PharmacyCustomRole, on_delete=models.PROTECT, null=True, blank=True)
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         ACCEPTED = "accepted", "Accepted"
@@ -151,7 +168,7 @@ class StaffInvitation(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [models.Index(fields=["email", "status"])]
+        indexes = [models.Index(fields=["email", "status"], name="work_invite_email_stat_idx")]
 
     @property
     def is_expired(self):
@@ -244,13 +261,14 @@ class PatientVisit(models.Model):
     reason = models.TextField(blank=True, default="")
     checked_in_at = models.DateTimeField(auto_now_add=True)
     checked_out_at = models.DateTimeField(null=True, blank=True)
+    checkout_note = models.CharField(max_length=1000, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-checked_in_at"]
         indexes = [
-            models.Index(fields=["organization", "status", "checked_in_at"]),
-            models.Index(fields=["patient", "checked_in_at"]),
+            models.Index(fields=["organization", "status", "checked_in_at"], name="work_visit_org_stat_idx"),
+            models.Index(fields=["patient", "checked_in_at"], name="work_visit_patient_idx"),
         ]
 
     def save(self, *args, **kwargs):
@@ -365,3 +383,41 @@ class MedicationAdministration(models.Model):
 
     def __str__(self):
         return f"{self.medication} — {self.visit.visit_number}"
+
+
+class VisitHandoff(models.Model):
+    class Destination(models.TextChoices):
+        RECEPTION = "reception", "Reception and records"
+        NURSING = "nursing", "Nursing and treatment"
+        LAB = "lab", "Laboratory"
+        IMAGING = "imaging", "Imaging"
+        PHARMACY = "pharmacy", "Facility pharmacy"
+        BILLING = "billing", "Billing"
+        SPECIALIST = "specialist", "Specialist or referral"
+        WARD = "ward", "Ward, observation or transfer"
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "Awaiting acceptance"
+        ACCEPTED = "accepted", "Accepted"
+        RETURNED = "returned", "Needs clinician review"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    visit = models.ForeignKey(PatientVisit, on_delete=models.PROTECT, related_name="handoffs")
+    destination = models.CharField(max_length=20, choices=Destination.choices)
+    pharmacy_order = models.OneToOneField("services.PharmacyOrder", on_delete=models.PROTECT, null=True, blank=True, related_name="facility_handoff")
+    lab_order = models.OneToOneField("services.LabOrder", on_delete=models.PROTECT, null=True, blank=True, related_name="facility_handoff")
+    referral_route = models.OneToOneField("operations.ReferralRoute", on_delete=models.PROTECT, null=True, blank=True, related_name="facility_handoff")
+    imaging_order = models.OneToOneField("operations.ImagingOrder", on_delete=models.PROTECT, null=True, blank=True, related_name="facility_handoff")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.REQUESTED)
+    priority = models.CharField(max_length=12, choices=PatientVisit.Priority.choices, default=PatientVisit.Priority.ROUTINE)
+    instructions = models.CharField(max_length=1000)
+    outcome = models.CharField(max_length=1000, blank=True)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    accepted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+        indexes = [models.Index(fields=["visit", "status"])]

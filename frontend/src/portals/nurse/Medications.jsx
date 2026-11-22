@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useOutletContext } from 'react-router-dom'
 import { workforceApi } from '../../api/endpoints'
 import { Alert, Button, Card, Input, Modal, Select, Spinner, Table, Textarea } from '../../components/ui'
 import { displayDate, getError, statusBadge, useRemote } from '../staff/shared'
 
 export default function Medications() {
+  const { hasHospital } = useOutletContext() || {}
   const visits = useRemote(() => workforceApi.visits(), [])
   const administrations = useRemote(() => workforceApi.medicationAdministrations(), [])
   const [open, setOpen] = useState(false)
@@ -32,7 +33,7 @@ export default function Medications() {
   if (visits.loading || administrations.loading) return <Spinner />
   return <>
     <Card title="Medication administration record" subtitle="Record what was given, held, refused or missed" actions={<div className="flex items-center gap-3">
-      <Link to="/nurse/scheduled-doses" className="text-sm font-semibold text-primary-700 hover:underline">Scheduled doses</Link>
+      {hasHospital && <Link to="/nurse/scheduled-doses" className="text-sm font-semibold text-primary-700 hover:underline">Scheduled doses</Link>}
       <Button onClick={() => { setError(''); setOpen(true) }}>Record administration</Button>
     </div>}>
       {(visits.error || administrations.error) && <Alert tone="danger">{visits.error || administrations.error}</Alert>}

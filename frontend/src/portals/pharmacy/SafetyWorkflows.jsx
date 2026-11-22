@@ -9,10 +9,10 @@ const witness = (key) => reference(key, 'Witness account ID for controlled stock
 
 export function PharmacySafety() {
   const { user } = useAuth()
-  if (user?.role !== 'pharmacist') return <Alert>Verified pharmacist access is required.</Alert>
-  return <OperationalWorkspace title="Pharmacy safety" organizationType="pharmacy" sections={[
+  if (!['pharmacist', 'pharmacy'].includes(user?.role)) return <Alert>Verified pharmacist access is required.</Alert>
+  return <OperationalWorkspace readOnly={user.role === 'pharmacy'} title="Pharmacy safety" organizationType="pharmacy" sections={[
     {
-      resource: 'pharmacy-returns',
+      resource: 'pharmacy-returns', actionPermission: 'safety_manage',
       label: 'Patient returns',
       organization: true,
       description: 'Use the movement reference from the completed order. Returned medicines are held separately from saleable stock.',
@@ -28,7 +28,7 @@ export function PharmacySafety() {
       ] : [],
     },
     {
-      resource: 'pharmacy-recalls',
+      resource: 'pharmacy-recalls', actionPermission: 'safety_manage',
       label: 'Recall follow-up',
       organization: true,
       description: 'Recalling a batch in Batch Stock & Safety creates follow-up records for patients with traced handovers.',
@@ -42,7 +42,7 @@ export function PharmacySafety() {
       ],
     },
     {
-      resource: 'pharmacy-safety-reports',
+      resource: 'pharmacy-safety-reports', actionPermission: 'safety_manage',
       label: 'Safety incidents',
       organization: true,
       description: 'Record medication errors, suspected adverse reactions, and quality defects. Log the reference after filing an external report.',
@@ -67,9 +67,9 @@ export function PharmacySafety() {
 
 export function PharmacyTransfers() {
   const { user } = useAuth()
-  if (user?.role !== 'pharmacist') return <Alert>Verified pharmacist access is required.</Alert>
-  return <OperationalWorkspace title="Branch transfers" organizationType="pharmacy" sections={[{
-    resource: 'pharmacy-transfers',
+  if (!['pharmacist', 'pharmacy'].includes(user?.role)) return <Alert>Verified pharmacist access is required.</Alert>
+  return <OperationalWorkspace readOnly={user.role === 'pharmacy'} title="Branch transfers" organizationType="pharmacy" sections={[{
+    resource: 'pharmacy-transfers', actionPermission: 'transfer_manage',
     label: 'Stock transfers',
     organization: true,
     description: 'Create matching batch records at both pharmacies before requesting a transfer. Both products need the same linked formulary reference.',

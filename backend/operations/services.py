@@ -13,7 +13,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from governance.services import audit
 from interoperability.services import emit_event
 from registry.models import Organization
-from services.models import Bed, Medicine, PatientCoverage
+from services.models import Bed, Medicine, PatientCoverage, PharmacyOrder
 
 from . import models as m
 from .access import clinician_at, patient_is_valid, require_organization, require_role
@@ -21,12 +21,16 @@ from .access import clinician_at, patient_is_valid, require_organization, requir
 
 def event(record, actor, action, **data):
     organization = getattr(record, "organization", None)
-    m.WorkflowEvent.objects.create(
+    workflow_event = m.WorkflowEvent.objects.create(
         organization=organization, resource_type=record.__class__.__name__,
         resource_id=record.pk, actor=actor, action=action, data=data,
     )
+    pharmacy_id = organization.owner_id if organization and organization.organization_type == "pharmacy" else None
+    if isinstance(record, PharmacyOrder):
+        pharmacy_id = record.pharmacy_id
+    metadata = {**data, "pharmacy_id": pharmacy_id, "workflow_event_id": workflow_event.pk} if pharmacy_id else data
     audit(actor=actor, action=f"operations.{action}", resource=record,
-          patient=getattr(record, "patient", None), metadata=data, purpose="operations")
+          patient=getattr(record, "patient", None), metadata=metadata, purpose="operations")
     emit_event(f"operations.{action}", record, {"id": record.pk, **data}, actor=actor,
                patient=getattr(record, "patient", None))
 
@@ -44,11 +48,19 @@ def available_bed(organization, bed_id):
 
 
 @transaction.atomic
-def admit(*, actor, organization, patient, attending_doctor, bed=None, **fields):
+def admit(*, actor, organization, patient, attending_doctor, bed=None, visit=None, **fields):
     require_organization(actor, organization.pk, {"hospital", "doctor", "nurse", "receptionist", "facility_manager"})
     patient_is_valid(patient)
-    if organization.organization_type not in {"hospital", "clinic"}:
-        raise ValidationError("Admissions require a hospital or clinic.")
+    if organization.organization_type != "hospital":
+        raise ValidationError("Admissions require a hospital.")
+    if visit:
+        from workforce.models import PatientVisit
+
+        visit = PatientVisit.objects.select_for_update().filter(
+            pk=visit.pk, organization=organization, patient=patient,
+        ).exclude(status__in=["completed", "cancelled"]).first()
+        if not visit:
+            raise ValidationError({"visit": "Select an open visit for this patient at this facility."})
     clinician_at(attending_doctor, organization)
     if attending_doctor.role != "doctor":
         raise ValidationError({"attending_doctor": "A verified doctor is required."})
@@ -61,7 +73,14 @@ def admit(*, actor, organization, patient, attending_doctor, bed=None, **fields)
         bed.is_occupied = True
         bed.save(update_fields=["is_occupied"])
     record = m.Admission.objects.create(organization=organization, created_by=actor,
-                                       patient=patient, attending_doctor=attending_doctor, bed=bed, **fields)
+                                       patient=patient, attending_doctor=attending_doctor, bed=bed, visit=visit, **fields)
+    if visit:
+        from workforce.models import VisitHandoff
+
+        visit.handoffs.filter(destination=VisitHandoff.Destination.WARD, status__in=[
+            VisitHandoff.Status.REQUESTED, VisitHandoff.Status.ACCEPTED,
+        ]).update(status=VisitHandoff.Status.COMPLETED, accepted_by=actor,
+                  outcome=f"Admitted under admission #{record.pk}.", updated_at=timezone.now())
     event(record, actor, "admission.created")
     return record
 
@@ -136,6 +155,13 @@ def procedure_action(record, actor, status, notes):
     return record
 
 
+def pack_units(medicine, packs):
+    quantity = medicine.units_per_pack * packs
+    if quantity < 0 or quantity > 2147483647:
+        raise ValidationError("Pack quantity exceeds the stock limit.")
+    return quantity
+
+
 def refresh_stock(medicine):
     """The legacy stock field mirrors sellable batch stock once batch tracking starts."""
     total = m.MedicineBatch.objects.filter(medicine=medicine, status="available",
@@ -166,6 +192,8 @@ def move_stock(batch, actor, *, quantity, kind, reason, reference, patient=None,
         raise ValidationError("Controlled products require a controlled batch.")
     if kind == "dispensed" and (batch.status != "available" or batch.expires_on <= timezone.localdate()):
         raise ValidationError("Expired, quarantined or recalled stock cannot be dispensed.")
+    if batch.quantity + quantity > 2147483647:
+        raise ValidationError("The resulting stock exceeds the stock limit.")
     if batch.quantity + quantity < 0:
         raise ValidationError("Insufficient batch stock.")
     if patient:
@@ -284,6 +312,9 @@ def online_orderable_batches(medicine):
         return medicine.batches.none()
     return medicine.batches.filter(
         organization__owner=medicine.pharmacy_id,
+        organization__owner__is_active=True,
+        organization__owner__role="pharmacy",
+        organization__organization_type="pharmacy",
         organization__active=True,
         organization__status="verified",
         status="available",
@@ -375,9 +406,13 @@ def referral_action(route, actor, status, *, version, outcome="", scheduled_at=N
         route.scheduled_at = scheduled_at
     referral.status = status
     referral.save(update_fields=["status", "updated_at"])
+    route.referral = referral
     route.outcome = outcome
     route.version += 1
     route.save()
+    from workforce.handoffs import update_referral_handoff
+
+    update_referral_handoff(route, actor, status)
     event(route, actor, "referral.transition", status=status, version=route.version)
     return route
 
@@ -497,6 +532,9 @@ def imaging_action(record, actor, status, *, version, study_uid="", report="", s
     record.status = status
     record.version += 1
     record.save()
+    from workforce.handoffs import update_imaging_handoff
+
+    update_imaging_handoff(record, actor)
     event(record, actor, "imaging.transition", status=status, version=record.version)
     return record
 

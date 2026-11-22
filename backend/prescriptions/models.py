@@ -23,8 +23,9 @@ class Prescription(models.Model):
     appointment = models.ForeignKey(
         "appointments.Appointment",
         on_delete=models.PROTECT,
-        related_name="prescriptions",
+        related_name="prescriptions", null=True, blank=True,
     )
+    visit = models.ForeignKey("workforce.PatientVisit", on_delete=models.PROTECT, null=True, blank=True, related_name="prescriptions")
     encounter = models.ForeignKey(
         "clinical.ClinicalEncounter",
         null=True,

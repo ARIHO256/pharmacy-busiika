@@ -6,25 +6,17 @@ import AcceptInvitation from '../../src/pages/AcceptInvitation'
 import Login from '../../src/pages/Login'
 import NotificationPreferences from '../../src/pages/NotificationPreferences'
 import Register from '../../src/pages/Register'
+import { PharmacyStaffLayout } from '../../src/portals/pharmacy/PharmacyPermissions'
+import PharmacyStore from '../../src/portals/patient/ext/PharmacyStore'
+import BuyerHome from './BuyerHome'
 import * as pharmacy from '../../src/portals/pharmacy/routes'
 import * as pharmacist from '../../src/portals/pharmacist/routes'
 
 const staffRoles = ['pharmacist', 'storekeeper', 'cashier']
 const pharmacyRoles = ['pharmacy', ...staffRoles]
-const salesPages = new Set(['counter', 'orders', 'shifts'])
-const stockPages = new Set(['inventory', 'procurement', 'stocktake', 'stock-control', 'suppliers', 'medicine-register'])
-const pharmacyLogin = {
-  kicker: 'Pharmacy owners and staff',
-  headline: ['Manage your pharmacy.', 'From stock to receipt.'],
-  description: 'Sign in to your pharmacy to review prescriptions, manage batch stock, and handle medicine orders.',
-  features: [
-    ['prescription', 'Prescriptions', 'Review and dispense from traceable batches'],
-    ['box', 'Stock', 'Manage purchasing, expiry dates, and stock counts'],
-    ['money', 'Orders and receipts', 'Record payments received and print receipts'],
-  ],
-}
-
+const accountRoles = ['patient', ...pharmacyRoles]
 function pharmacyHome(user) {
+  if (user.role === 'patient') return '/shop'
   if (user.role === 'cashier') return '/pharmacist/counter'
   if (user.role === 'storekeeper') return '/pharmacist/inventory'
   if (user.role === 'pharmacist') return '/pharmacist/rx-orders'
@@ -39,7 +31,7 @@ function AccountNotice({ verification = false }) {
       <Card title={verification ? 'Pharmacist verification' : 'This account uses a different workspace'}>
         <p className="text-sm text-slate-600">{verification
           ? 'A verified pharmacist account is required to access dispensing and stock workflows. Contact the person who invited you for help with your verification.'
-          : `${user.email} is signed in. MyDoctor Pharmacy is for pharmacy owners and invited pharmacy staff.`}</p>
+          : `${user.email} is signed in. MyDoctor Pharmacy is for buyers, pharmacy owners, and invited pharmacy staff.`}</p>
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <Button onClick={logout}>Sign out</Button>
           {!verification && platform && <a className="text-sm font-semibold text-primary-700" href={platform}>Open MyDoctor HealthOS</a>}
@@ -49,12 +41,12 @@ function AccountNotice({ verification = false }) {
   </main>
 }
 
-function PharmacyAccess({ allowed = pharmacyRoles, children }) {
+function PharmacyAccess({ allowed = accountRoles, children }) {
   const { user, loading } = useAuth()
   const location = useLocation()
   if (loading) return <Spinner label="Loading pharmacy workspace…" />
   if (!user) return <Navigate to="/login" state={{ from: location.pathname + location.search }} replace />
-  if (!pharmacyRoles.includes(user.role)) return <AccountNotice />
+  if (!accountRoles.includes(user.role)) return <AccountNotice />
   if (user.role === 'pharmacist' && !user.is_verified) return <AccountNotice verification />
   if (!allowed.includes(user.role)) return <Navigate to={pharmacyHome(user)} replace />
   return children
@@ -70,7 +62,8 @@ function PharmacyLogin() {
   const { state } = useLocation()
   if (loading) return <Spinner />
   if (user) return <Navigate to="/dashboard" replace />
-  return <Login product={pharmacyLogin} destination={(account) => {
+  return <Login pharmacy destination={(account) => {
+    if (account.role === 'patient') return '/shop'
     const prefix = account.role === 'pharmacy' ? '/pharmacy' : '/pharmacist'
     const from = state?.from
     return pharmacyRoles.includes(account.role) && typeof from === 'string' && from.startsWith(prefix + '/')
@@ -80,15 +73,17 @@ function PharmacyLogin() {
 }
 
 function orderedNavigation(nav) {
-  const priority = ['end', 'counter', 'rx-orders', 'orders', 'shifts', 'inventory', 'stock-control', 'stocktake', 'transfers',
-    'procurement', 'suppliers', 'safety', 'medicine-register', 'staff', 'taxonomy', 'profile']
+  const priority = ['end', 'counter', 'rx-orders', 'orders', 'shifts', 'refunds', 'credit', 'inventory', 'stock-setup', 'stock-control', 'stocktake', 'transfers',
+    'procurement', 'suppliers', 'safety', 'reports', 'medicine-register', 'staff', 'taxonomy', 'audit', 'profile']
   return nav.map((item) => {
     const page = item.end ? 'end' : item.to.split('/').at(-1)
     const group = {
       'rx-orders': 'Dispensing', orders: 'Sales', procurement: 'Purchasing', suppliers: 'Purchasing',
       safety: 'Safety', 'medicine-register': 'Inventory',
     }[page] || item.group
-    return { ...item, group, label: page === 'orders' ? 'Orders & Receipts' : item.label, index: priority.indexOf(page) }
+    const label = { end: 'Overview', orders: 'Orders & Receipts', 'medicine-register': 'Medicine Register' }[page] || item.label
+    const mobileLabel = { counter: 'New sale', 'rx-orders': 'Prescriptions', shifts: 'Shifts' }[page]
+    return { ...item, group, label, mobileLabel, index: priority.indexOf(page) }
   }).sort((first, second) => first.index - second.index)
 }
 
@@ -98,18 +93,12 @@ const staffNav = orderedNavigation(pharmacist.nav)
 function PharmacyShell({ staff }) {
   const { user } = useAuth()
   const location = useLocation()
-  const stockOnly = user.role === 'storekeeper'
-  const salesOnly = user.role === 'cashier'
   const page = location.pathname.split('/')[2]
-  if (!staff && !user.is_verified && page !== 'profile') return <Navigate to="/pharmacy/profile" replace />
-  if (salesOnly && !salesPages.has(page)) return <Navigate to='/pharmacist/counter' replace />
-  if (stockOnly && !stockPages.has(page)) return <Navigate to="/pharmacist/inventory" replace />
-  let nav = staff ? staffNav : ownerNav
-  if (salesOnly) nav = nav.filter((item) => salesPages.has(item.to.split('/').at(-1)))
-  if (stockOnly) nav = nav.filter((item) => stockPages.has(item.to.split('/').at(-1)))
-  if (!staff && !user.is_verified) nav = nav.filter((item) => item.to === '/pharmacy/profile')
-  return <PortalLayout nav={nav} role={staff ? 'pharmacist' : 'pharmacy'}
+  if (staff) return <PharmacyStaffLayout nav={staffNav} role="pharmacist"
     title="MyDoctor Pharmacy" productLabel="Pharmacy" home={pharmacyHome(user)} />
+  if (!user.is_verified && page !== 'profile') return <Navigate to="/pharmacy/profile" replace />
+  const nav = user.is_verified ? ownerNav : ownerNav.filter((item) => item.to === '/pharmacy/profile')
+  return <PortalLayout nav={nav} role="pharmacy" title="MyDoctor Pharmacy" productLabel="Pharmacy" home={pharmacyHome(user)} />
 }
 
 function workspace(path, allowed, module) {
@@ -121,10 +110,12 @@ function workspace(path, allowed, module) {
 
 export default function PharmacyApp() {
   return <Routes>
-    <Route path="/" element={<PharmacyAccess><WorkspaceHome /></PharmacyAccess>} />
+    <Route path="/" element={<BuyerHome />} />
+    <Route path="/shop" element={<PharmacyAccess allowed={['patient']}><BuyerHome shop><PharmacyStore buyer /></BuyerHome></PharmacyAccess>} />
     <Route path="/dashboard" element={<PharmacyAccess><WorkspaceHome /></PharmacyAccess>} />
     <Route path="/login" element={<PharmacyLogin />} />
-    <Route path="/register" element={<Register pharmacyOnly />} />
+    <Route path="/register" element={<Register pharmacyBuyer accountRole="patient" />} />
+    <Route path="/onboard-pharmacy" element={<Register pharmacyOnly />} />
     <Route path="/accept-invitation/:token" element={<AcceptInvitation allowedRoles={pharmacyRoles} />} />
     <Route path="/notification-settings" element={<PharmacyAccess><NotificationPreferences /></PharmacyAccess>} />
     {workspace('pharmacy', ['pharmacy'], pharmacy)}

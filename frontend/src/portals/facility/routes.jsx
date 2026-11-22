@@ -1,3 +1,4 @@
+import Handoffs from './Handoffs'
 import ManageTaxonomy from '../pharmacy/ManageTaxonomy'
 import Dashboard from './Dashboard'
 import Staff from './Staff'
@@ -6,7 +7,46 @@ import Queue from '../reception/Queue'
 import Invoices from '../cashier/Invoices'
 import Shifts from '../cashier/Shifts'
 import Operations from './Operations'
-export const nav=[
-  { to: '/facility/pharmacy-taxonomy', label: 'Manage Taxonomy', icon: 'settings', group: 'Settings' },{to:'/facility',label:'Facility Dashboard',icon:'dashboard',end:true,group:'Overview',description:'People, care flow and operational performance'},{to:'/facility/staff',label:'Staff & Roles',icon:'users',group:'Workforce',description:'Invite, verify, suspend and assign facility staff'},{to:'/facility/departments',label:'Departments',icon:'hospital',group:'Workforce',description:'Configure clinical and operational units'},{to:'/facility/queue',label:'Patient Flow',icon:'activity',group:'Operations',description:'Monitor triage, consultation, billing and completion'},{to:'/facility/operations',label:'Operations',icon:'hospital',group:'Operations',description:'Admissions, procedures, referrals and diagnostics'},{to:'/facility/invoices',label:'Billing Oversight',icon:'money',group:'Finance',description:'Review invoices, collections and balances'},{to:'/facility/shifts',label:'Cashier Controls',icon:'audit',group:'Finance',description:'Review cash sessions and variances'}]
-export const routes=[
-  { path: 'pharmacy-taxonomy', element: <ManageTaxonomy /> },{index:true,element:<Dashboard/>},{path:'staff',element:<Staff/>},{path:'departments',element:<Departments/>},{path:'queue',element:<Queue/>},{path:'operations',element:<Operations/>},{path:'invoices',element:<Invoices/>},{path:'shifts',element:<Shifts readOnly/>}]
+import Services from '../hospital/Services'
+import Bookings from '../hospital/Bookings'
+import Beds from '../hospital/Beds'
+import { ProviderProfile } from '../pharmacy/shared'
+
+const shared = [
+  { path: '', label: 'Overview', icon: 'dashboard', group: 'Overview', element: <Dashboard /> },
+  { path: 'bookings', label: 'Bookings', icon: 'calendar', group: 'Patient care', element: <Bookings /> },
+  { path: 'queue', label: 'Patient Flow', icon: 'activity', group: 'Patient care', element: <Queue /> },
+  { path: 'services', label: 'Facility Services', icon: 'hospital', group: 'Patient care', element: <Services /> },
+  { path: 'operations', label: 'Referrals & Diagnostics', icon: 'clipboard', group: 'Patient care',
+    manager: true, element: <Operations key="diagnostics" resources={['referrals', 'imaging', 'offline-nodes']} facilityOnly /> },
+  { path: 'handoffs', label: 'Patient Handoffs', icon: 'clipboard', group: 'Patient care', element: <Handoffs /> },
+  { path: 'admissions', label: 'Admissions', icon: 'clipboard', group: 'Inpatient & Theatre',
+    hospital: true, element: <Operations key="admissions" resource="admissions" facilityOnly /> },
+  { path: 'beds', label: 'Wards & Beds', icon: 'bed', group: 'Inpatient & Theatre', hospital: true, element: <Beds /> },
+  { path: 'medications', label: 'Medication Schedules', icon: 'pill', group: 'Inpatient & Theatre',
+    hospital: true, manager: true, element: <Operations key="medications" resource="medication-schedules" facilityOnly /> },
+  { path: 'theatre', label: 'Theatre', icon: 'calendar', group: 'Inpatient & Theatre',
+    hospital: true, element: <Operations key="theatre" resource="procedures" facilityOnly /> },
+  { path: 'invoices', label: 'Billing Oversight', icon: 'money', group: 'Billing', element: <Invoices /> },
+  { path: 'shifts', label: 'Cashier Shifts', icon: 'audit', group: 'Billing', element: <Shifts readOnly /> },
+  { path: 'staff', label: 'Staff & Access', icon: 'users', group: 'Administration', element: <Staff /> },
+  { path: 'departments', label: 'Departments', icon: 'hospital', group: 'Administration', element: <Departments /> },
+  { path: 'pharmacy-taxonomy', label: 'Pharmacy Taxonomy', icon: 'settings', group: 'Administration', pharmacy: true, element: <ManageTaxonomy /> },
+  { path: 'profile', label: 'Facility Profile', icon: 'settings', group: 'Administration', owner: true, element: <ProviderProfile /> },
+]
+
+export const routes = shared.map(({ path, element }) => path ? { path, element } : { index: true, element })
+
+export function facilityNavigation(type, role, hasPharmacy) {
+  return shared.filter((item) => {
+    if (!type) return item.owner
+    if (item.hospital && type !== 'hospital') return false
+    if (item.pharmacy && !hasPharmacy) return false
+    if (item.manager && role !== 'facility_manager') return false
+    return !item.owner || role === 'hospital'
+  }).map(({ path, label, icon, group }) => ({
+    to: path ? `/facility/${path}` : '/facility',
+    end: !path,
+    label, icon, group,
+  }))
+}

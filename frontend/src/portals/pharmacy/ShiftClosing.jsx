@@ -1,3 +1,4 @@
+import { usePharmacyPermissions } from './PharmacyPermissions'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
@@ -6,6 +7,7 @@ import { Alert, Button, Card, Input, Table, Textarea } from '../../components/ui
 import { errMsg, fmtDate, LoadingOrError, money, useApi } from './shared'
 
 export default function ShiftClosing() {
+  const allows = usePharmacyPermissions()
   const { user } = useAuth()
   const shifts = useApi(() => servicesApi.pharmacyShifts())
   const [cash, setCash] = useState('')
@@ -35,7 +37,7 @@ export default function ShiftClosing() {
 
   return <LoadingOrError loading={shifts.loading} error={shifts.error}>
     <div className="space-y-5">
-      <Card title={active ? 'Close your shift' : 'Open a shift'}>
+      {allows('shift_manage') && <Card title={active ? 'Close your shift' : 'Open a shift'}>
         <form className="max-w-lg space-y-4" onSubmit={submit}>
           {error && <Alert tone="danger">{error}</Alert>}
           {active && <p>Expected cash <strong>{money(active.expected_cash)}</strong></p>}
@@ -44,8 +46,8 @@ export default function ShiftClosing() {
           {active && <Textarea label="Notes on any difference" maxLength={2000} value={notes} onChange={(event) => setNotes(event.target.value)} />}
           <Button type="submit" disabled={busy}>{busy ? 'Saving…' : active ? 'Close and reconcile' : 'Open shift'}</Button>
         </form>
-      </Card>
-      <Card title="Recent shifts" actions={user?.role !== 'cashier' && <Link className="text-primary-700 underline" to={`${base}/stocktake`}>Open physical stocktake</Link>}>
+      </Card>}
+      <Card title="Recent shifts" actions={user?.role !== 'cashier' && allows('stocktake') && <Link className="text-primary-700 underline" to={`${base}/stocktake`}>Open physical stocktake</Link>}>
         <Table rows={shifts.data || []} empty="No shifts yet" columns={[
           { key: 'cashier_name', label: 'Staff member' },
           { key: 'opened_at', label: 'Opened', render: (row) => fmtDate(row.opened_at) },

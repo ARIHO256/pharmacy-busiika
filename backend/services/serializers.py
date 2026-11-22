@@ -59,6 +59,10 @@ class ProviderDirectorySerializer(serializers.Serializer):
 class MedicineSerializer(serializers.ModelSerializer):
     image = serializers.ImageField(required=False, allow_null=True)
     available_online = serializers.SerializerMethodField()
+    units_per_pack = serializers.IntegerField(min_value=1, max_value=1000000, required=False)
+    reorder_level = serializers.IntegerField(min_value=0, max_value=2147483647, required=False)
+    wholesale_minimum = serializers.IntegerField(min_value=2, max_value=1000000, required=False, allow_null=True)
+    wholesale_unit_price = serializers.IntegerField(min_value=1, max_value=2147483647, required=False, allow_null=True)
     taxonomy_node = serializers.PrimaryKeyRelatedField(
         queryset=MedicineTaxonomyNode.objects.filter(
             level=MedicineTaxonomyNode.Level.SUBCATEGORY,
@@ -70,10 +74,12 @@ class MedicineSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Medicine
-        fields = ["id", "pharmacy", "name", "description", "price", "stock", "image", "sale_type", "taxonomy_node", "product_attributes", "available_online"]
+        fields = ["id", "pharmacy", "name", "description", "price", "units_per_pack", "unit_label", "reorder_level", "wholesale_minimum", "wholesale_unit_price", "stock", "image", "sale_type", "taxonomy_node", "product_attributes", "available_online"]
         read_only_fields = ["id", "pharmacy"]
 
     def get_available_online(self, obj):
+        if hasattr(obj, "shop_stock"):
+            return bool(obj.shop_stock)
         from operations.services import online_orderable_batches
         return online_orderable_batches(obj).filter(quantity__gt=0).exists()
 
@@ -124,6 +130,16 @@ class MedicineSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         self.validate_catalogue_attributes(attrs)
+        if self.instance and self.instance.batches.exists() and attrs.get("unit_label", self.instance.unit_label) != self.instance.unit_label:
+            raise serializers.ValidationError({"unit_label": "Use the existing base unit once batch history exists."})
+        if {"wholesale_minimum", "wholesale_unit_price"} & attrs.keys():
+            from operations.access import require_role
+
+            require_role(self.context["request"].user, {"pharmacy", "pharmacist", "facility_manager"})
+            minimum = attrs.get("wholesale_minimum", getattr(self.instance, "wholesale_minimum", None))
+            price = attrs.get("wholesale_unit_price", getattr(self.instance, "wholesale_unit_price", None))
+            if (minimum is None) != (price is None):
+                raise serializers.ValidationError("Set both a wholesale minimum and unit price, or clear both.")
         if "sale_type" in attrs:
             from operations.access import require_role
             require_role(self.context["request"].user, {"pharmacy", "pharmacist", "facility_manager"})
@@ -144,7 +160,9 @@ class MedicineSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        if instance.batches.exists():
+        if hasattr(instance, "shop_stock"):
+            data["stock"] = instance.shop_stock
+        elif instance.batches.exists():
             data["stock"] = self._available_stock(instance)
         return data
 
@@ -167,6 +185,10 @@ class OrderItemSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     payment_recorded = serializers.SerializerMethodField()
+    billing_status = serializers.CharField(source="invoice.status", read_only=True, default=None)
+    credit = serializers.SerializerMethodField()
+    pharmacy_contact = serializers.SerializerMethodField()
+    open_issues = serializers.IntegerField(read_only=True, default=0)
     pharmacy_name = serializers.SerializerMethodField()
     dispensed_batches = serializers.SerializerMethodField()
     patient_name = serializers.SerializerMethodField()
@@ -178,10 +200,11 @@ class OrderSerializer(serializers.ModelSerializer):
             "patient",
             "patient_name",
             "pharmacy",
-            "pharmacy_name",
+            "pharmacy_name", "pharmacy_contact", "pickup_instructions",
             "status",
             "total",
             "payment_recorded",
+            "billing_status", "credit", "open_issues",
             "delivery",
             "address",
             "handed_over_at",
@@ -190,8 +213,23 @@ class OrderSerializer(serializers.ModelSerializer):
             "dispensed_batches",
         ]
 
+    def get_pharmacy_contact(self, obj):
+        from registry.models import Organization
+
+        request = self.context.get("request")
+        if not request or request.user.role != "patient":
+            return None
+        return Organization.objects.filter(
+            owner_id=obj.pharmacy_id, organization_type="pharmacy", active=True, status="verified",
+        ).order_by("pk").values("phone", "address", "legal_name").first()
+
     def get_payment_recorded(self, obj):
-        return obj.invoice_id is not None
+        return bool(obj.invoice_id and obj.invoice.status in {"paid", "partially_paid", "refunded"})
+
+    def get_credit(self, obj):
+        if obj.invoice_id and obj.invoice.due_at:
+            return {"due_at": obj.invoice.due_at, "balance": 0 if obj.invoice.status in {"refunded", "void"} else obj.invoice.balance}
+        return None
 
     def get_dispensed_batches(self, obj):
         request = self.context.get("request")
@@ -210,6 +248,7 @@ class OrderSerializer(serializers.ModelSerializer):
 
 
 class PharmacyOrderSerializer(serializers.ModelSerializer):
+    open_issues = serializers.IntegerField(read_only=True, default=0)
     pharmacy_name = serializers.CharField(source="pharmacy.display_name")
     patient_name = serializers.SerializerMethodField()
     prescription_items = serializers.SerializerMethodField()
@@ -225,7 +264,7 @@ class PharmacyOrderSerializer(serializers.ModelSerializer):
             "id",
             "pharmacy",
             "prescription_id",
-            "pharmacy_name",
+            "pharmacy_name", "open_issues",
             "patient",
             "patient_name",
             "status",

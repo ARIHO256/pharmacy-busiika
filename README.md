@@ -103,7 +103,7 @@ Authenticated users can enter their role dashboard from `/dashboard` or the land
 | Facility manager | `/facility` | departments, staff invitations, memberships, operations and billing oversight |
 | Pharmacy organization | `/pharmacy` | organization inventory, commerce and prescription orders |
 | Laboratory organization | `/lab` | test catalogue and laboratory operations |
-| Hospital / Clinic organization | `/hospital` | services, bookings and bed management |
+| Clinic / Hospital organization | `/facility` | shared bookings, patient flow, billing and staff administration, with inpatient tools for hospitals |
 | Insurance organization / officer | `/insurance` | plans, coverage and claims |
 | Platform administrator | `/admin` | users, verification, protected evidence, appointments, finance, compliance and audit |
 
@@ -150,6 +150,15 @@ After installing both dependency sets, you may also start both servers from the 
 ./start-dev.sh
 ```
 
+
+### Clinic and hospital workspace
+
+The main frontend at `http://localhost:3000` is MyDoctor Facility. Public
+registration creates a patient account. A clinic or hospital owner can apply
+through **Register a clinic or hospital** and invite their team from **Staff &
+Access** once verified. Both organization types use `/facility`. Admissions,
+wards, beds and theatre are available for hospitals. Existing `/hospital`
+bookmarks redirect to the corresponding Facility page.
 
 ### Standalone Pharmacy frontend
 

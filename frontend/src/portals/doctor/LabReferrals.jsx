@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom'
 import { useMemo, useState } from 'react'
 import { appointmentApi, servicesApi, workforceApi } from '../../api/endpoints'
 import { Alert, Button, Card, Input, Modal, Select, Spinner, Table, Textarea } from '../../components/ui'
@@ -74,6 +75,7 @@ function ResultReview({ order, onClose, onAcknowledged, canResume, onResumed }) 
 }
 
 export default function LabReferrals(){
+ const [params] = useSearchParams()
  const [reviewOrder,setReviewOrder]=useState(null)
  const [criticalOnly,setCriticalOnly]=useState(false)
  const visits=useRemote(()=>workforceApi.visits(),[])
@@ -82,9 +84,14 @@ export default function LabReferrals(){
  const selectLab=async(value)=>{setForm({...form,lab_id:value,test_id:''});if(!value)return setTests([]);try{const{data}=await servicesApi.labTests({lab:value});setTests(data)}catch(e){setError(getError(e))}}
  const save=async(e)=>{e.preventDefault();setError('');try{await servicesApi.bookLab(form);setOpen(false);referrals.reload();visits.reload()}catch(err){setError(getError(err))}}
  const activeVisits = (visits.data || []).filter((visit) => visit.assigned_doctor && !['completed', 'cancelled'].includes(visit.status))
+ const openOrder = () => {
+   const visit = activeVisits.find((row) => String(row.id) === params.get('visit'))
+   if (visit) setForm((current) => ({ ...current, visit_id: visit.id, patient_id: visit.patient }))
+   setOpen(true)
+ }
  const orders = referrals.data || []
  const criticalCount = orders.filter((order) => order.critical_review_pending).length
- if((referrals.loading && !referrals.data)||appointments.loading||labs.loading)return <Spinner/>;return <><Card title="Laboratory referrals" subtitle="Request a test, provide clinical indication and track specimen-to-result status" actions={<Button onClick={()=>setOpen(true)}>New laboratory order</Button>}>{(error||referrals.error)&&<Alert tone="danger" className="mb-4">{error||referrals.error}</Alert>}<div className="mb-4 flex flex-wrap gap-2">
+ if((referrals.loading && !referrals.data)||appointments.loading||labs.loading)return <Spinner/>;return <><Card title="Laboratory referrals" subtitle="Request a test, provide clinical indication and track specimen-to-result status" actions={<Button onClick={openOrder}>New laboratory order</Button>}>{(error||referrals.error)&&<Alert tone="danger" className="mb-4">{error||referrals.error}</Alert>}<div className="mb-4 flex flex-wrap gap-2">
    <Button variant={criticalOnly ? 'outline' : 'primary'} aria-pressed={!criticalOnly} onClick={() => setCriticalOnly(false)}>All referrals</Button>
    <Button variant={criticalOnly ? 'primary' : 'outline'} aria-pressed={criticalOnly} onClick={() => setCriticalOnly(true)}>Critical review pending ({criticalCount})</Button>
  </div><Table rows={criticalOnly ? orders.filter((order) => order.critical_review_pending) : orders} empty={criticalOnly ? "No critical results awaiting acknowledgement" : "No laboratory referrals created"} columns={[{key:'created_at',label:'Ordered',render:o=>displayDate(o.created_at)},{key:'patient_name',label:'Patient'},{key:'test_name',label:'Test'},{key:'lab_name',label:'Laboratory'},{key:'priority',label:'Priority',render:o=>statusBadge(o.priority)},{key:'status',label:'Status',render:o=>statusBadge(o.status)},{key:'result',label:'Result',render:o=>o.result_released?<Button variant="outline" onClick={()=>setReviewOrder(o)}>{o.has_critical_result ? 'Review critical result' : 'Review results'}</Button>:<span className="text-slate-400">Pending</span>}]}/></Card><Modal open={open} onClose={()=>setOpen(false)} wide title="Order laboratory test"><form onSubmit={save} className="space-y-4"><Select required label="Patient or assigned visit" value={form.visit_id ? `visit:${form.visit_id}` : form.patient_id} onChange={(event) => {

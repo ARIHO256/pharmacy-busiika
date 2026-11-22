@@ -56,7 +56,7 @@ ROLE_PORTAL_PATHS = {
     "insurance_officer": "/insurance",
     "pharmacy": "/pharmacy",
     "lab": "/lab",
-    "hospital": "/hospital",
+    "hospital": "/facility",
     "insurance": "/insurance",
     "admin": "/admin",
 }

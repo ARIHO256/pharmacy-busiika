@@ -107,7 +107,7 @@ class OperationsContext(APIView):
         member_ids = StaffMembership.objects.filter(organization__in=scoped, status="active").values("user_id")
         practitioner_ids = PractitionerRole.objects.filter(organization__in=scoped, active=True).values("practitioner_id")
         doctors = User.objects.filter(Q(pk__in=member_ids) | Q(pk__in=practitioner_ids), role="doctor", is_verified=True, is_active=True)
-        beds = Bed.objects.filter(hospital_id__in=scoped.values("owner_id"))
+        beds = Bed.objects.filter(hospital_id__in=scoped.filter(organization_type="hospital").values("owner_id"))
         audit(actor=request.user, action="operations.context.read", purpose="operations", request=request)
         patient_search = request.query_params.get("patient_search")
         if patient_search is not None:
@@ -136,6 +136,7 @@ class OperationsContext(APIView):
             "can_administer": request.user.role in {"doctor", "nurse", "admin"},
             "can_review_offline": request.user.role in {"doctor", "nurse", "admin"},
             "can_close_referrals": request.user.role in {"doctor", "admin"},
+            "can_acquire_imaging": request.user.role in {"doctor", "lab_technician", "admin"},
             "can_report_imaging": request.user.role in {"doctor", "admin"},
             "can_discharge": request.user.role in {"doctor", "admin"},
             "medicines": [{"id": med.pk, "name": med.name} for med in Medicine.objects.filter(pharmacy_id__in=scoped.values("owner_id"))[:200]],

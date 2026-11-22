@@ -1,3 +1,4 @@
+import { usePharmacyPermissions } from './PharmacyPermissions'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
@@ -14,7 +15,7 @@ const saleTypes = {
   prescription: 'Prescription only',
   controlled: 'Controlled',
 }
-const emptyForm = { family: '', category: '', taxonomy_node: '', product_attributes: {}, sale_type: 'unclassified', name: '', description: '', price: '', stock: '', image: null }
+const emptyForm = { family: '', category: '', taxonomy_node: '', product_attributes: {}, sale_type: 'unclassified', name: '', description: '', price: '', units_per_pack: 1, unit_label: 'unit', reorder_level: 0, wholesale_minimum: '', wholesale_unit_price: '', stock: '', image: null }
 
 export default function Inventory() {
   const [tab, setTab] = useState('inventory')
@@ -28,7 +29,9 @@ export default function Inventory() {
 }
 
 function InventoryList() {
+  const allows = usePharmacyPermissions()
   const { user } = useAuth()
+  const canManageSaved = user?.role === 'pharmacy'
   const canClassify = user?.role !== 'storekeeper'
   const { data: meds, loading, error, reload } = useApi(() => servicesApi.medicines())
   const taxonomy = useApi(() => servicesApi.medicineTaxonomy())
@@ -45,7 +48,7 @@ function InventoryList() {
   }
 
   const openEdit = (med) => {
-    setForm({ ...emptyForm, taxonomy_node: med.taxonomy_node || '', product_attributes: med.product_attributes || {}, sale_type: med.sale_type, name: med.name, description: med.description || '', price: med.price, stock: med.stock, image: null })
+    setForm({ ...emptyForm, taxonomy_node: med.taxonomy_node || '', product_attributes: med.product_attributes || {}, sale_type: med.sale_type, name: med.name, description: med.description || '', price: med.price, units_per_pack: med.units_per_pack, unit_label: med.unit_label, reorder_level: med.reorder_level, wholesale_minimum: med.wholesale_minimum ?? '', wholesale_unit_price: med.wholesale_unit_price ?? '', stock: med.stock, image: null })
     setSaveError('')
     setModal({ editing: med })
   }
@@ -56,7 +59,11 @@ function InventoryList() {
     setSaveError('')
     try {
       const fd = new FormData()
-      if (canClassify) fd.append('sale_type', form.sale_type)
+      if (canClassify) {
+        fd.append('sale_type', form.sale_type)
+        fd.append('wholesale_minimum', form.wholesale_minimum)
+        fd.append('wholesale_unit_price', form.wholesale_unit_price)
+      }
       if (!taxonomy.error && !taxonomy.loading && taxonomy.data?.length) {
         fd.append('taxonomy_node', form.taxonomy_node)
         fd.append('product_attributes', JSON.stringify(form.product_attributes))
@@ -64,6 +71,7 @@ function InventoryList() {
       fd.append('name', form.name)
       fd.append('description', form.description)
       fd.append('price', form.price)
+      for (const key of ['units_per_pack', 'unit_label', 'reorder_level']) fd.append(key, form[key])
       fd.append('stock', form.stock)
       if (form.image) fd.append('image', form.image)
       if (modal.editing) {
@@ -101,7 +109,7 @@ function InventoryList() {
     <LoadingOrError loading={loading} error={error}>
       <Card title="Medicine inventory" actions={<div className="flex flex-wrap items-center gap-3">
         {user?.role === 'pharmacy' && <Link to="/pharmacy/taxonomy" className="text-sm font-semibold text-primary-700">Manage taxonomy</Link>}
-        <Button onClick={openAdd}>+ Add medicine</Button>
+        {allows('catalogue_edit') && <Button onClick={openAdd}>+ Add medicine</Button>}
       </div>}>
         <Table
           empty="No medicines yet — add your first one."
@@ -126,6 +134,7 @@ function InventoryList() {
               taxonomy.data?.find((node) => node.node_id === medicine.taxonomy_node)?.name || '—' },
             { key: 'sale_type', label: 'Sale classification', render: (m) => saleTypes[m.sale_type] },
             { key: 'price', label: 'Price', render: (m) => money(m.price) },
+            { key: 'wholesale_minimum', label: 'Wholesale', render: (m) => m.wholesale_minimum ? `${m.wholesale_minimum}+ at ${money(m.wholesale_unit_price)} each` : '—' },
             {
               key: 'stock',
               label: 'Stock',
@@ -138,7 +147,7 @@ function InventoryList() {
             {
               key: 'actions',
               label: '',
-              render: (m) => (
+              render: (m) => canManageSaved && (
                 <div className="flex gap-2 justify-end">
                   <Button variant="outline" onClick={() => openEdit(m)}>
                     Edit
@@ -190,6 +199,24 @@ function InventoryList() {
               required
             />
           </div>
+          <fieldset className="grid gap-3 sm:grid-cols-3">
+            <legend className="mb-2 text-sm font-semibold">Pack sizes and stock</legend>
+            <Input label="Base unit (e.g. tablet)" required maxLength={32} value={form.unit_label}
+              onChange={(e) => setForm({ ...form, unit_label: e.target.value })} />
+            <Input label="Units in one pack" required type="number" min="1" max="1000000" value={form.units_per_pack}
+              onChange={(e) => setForm({ ...form, units_per_pack: e.target.value })} />
+            <Input label="Reorder at this quantity" required type="number" min="0" value={form.reorder_level}
+              onChange={(e) => setForm({ ...form, reorder_level: e.target.value })} />
+            <p className="text-sm text-slate-600 sm:col-span-3">Enter retail and wholesale prices per base unit. For a wholesale pack minimum, enter the equivalent number of base units.</p>
+          </fieldset>
+          {canClassify && form.sale_type === 'otc' && <fieldset className="grid gap-3 sm:grid-cols-2">
+            <legend className="mb-2 text-sm font-semibold">Wholesale ordering</legend>
+            <Input label="Minimum units per order" type="number" min="2" max="1000000" required={Boolean(form.wholesale_unit_price)}
+              value={form.wholesale_minimum} onChange={(e) => setForm({ ...form, wholesale_minimum: e.target.value })} />
+            <Input label="Wholesale unit price (UGX)" type="number" min="1" required={Boolean(form.wholesale_minimum)}
+              value={form.wholesale_unit_price} onChange={(e) => setForm({ ...form, wholesale_unit_price: e.target.value })} />
+            <p className="text-sm text-slate-600 sm:col-span-2">Leave both fields blank to keep this product out of the wholesale shop.</p>
+          </fieldset>}
           <Input
             label="Image (optional)"
             type="file"

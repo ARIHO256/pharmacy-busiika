@@ -17,7 +17,7 @@ export const ROLE_HOME = {
   storekeeper: '/pharmacist',
   pharmacy: '/pharmacy',
   lab: '/lab',
-  hospital: '/hospital',
+  hospital: '/facility',
   insurance: '/insurance',
   admin: '/admin',
 }

@@ -51,6 +51,11 @@ class Medicine(models.Model):
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True, default="")
     price = models.IntegerField()
+    units_per_pack = models.PositiveIntegerField(default=1)
+    unit_label = models.CharField(max_length=32, default="unit")
+    reorder_level = models.PositiveIntegerField(default=0)
+    wholesale_minimum = models.PositiveIntegerField(null=True, blank=True)
+    wholesale_unit_price = models.PositiveIntegerField(null=True, blank=True)
     stock = models.IntegerField(default=0)
     image = models.ImageField(upload_to="medicines/", null=True, blank=True)
 
@@ -83,6 +88,7 @@ class Order(models.Model):
     counter_reference = models.UUIDField(unique=True, null=True, blank=True, editable=False)
     invoice = models.OneToOneField("payments.Invoice", on_delete=models.PROTECT, null=True, blank=True,
                                    related_name="pharmacy_sale")
+    pickup_instructions = models.CharField(max_length=500, blank=True)
     delivery = models.BooleanField(default=False)
     address = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -433,3 +439,47 @@ class CriticalResultAcknowledgement(models.Model):
 
     def __str__(self):
         return f"Acknowledged result {self.result_id}"
+
+
+class PharmacyRolePolicy(models.Model):
+    pharmacy = models.ForeignKey(AUTH_USER, on_delete=models.CASCADE, related_name="pharmacy_role_policies")
+    role = models.CharField(max_length=24)
+    permissions = models.JSONField(default=list)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("pharmacy", "role"), name="unique_pharmacy_role_policy")]
+
+
+class PharmacyRefund(models.Model):
+    order = models.OneToOneField(Order, on_delete=models.PROTECT, related_name="refund")
+    amount = models.PositiveBigIntegerField()
+    reason = models.CharField(max_length=1000)
+    reference = models.CharField(max_length=120)
+    approved_by = models.ForeignKey(AUTH_USER, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class PharmacyOrderIssue(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.PROTECT, related_name="issues", null=True, blank=True)
+    prescription_order = models.ForeignKey(PharmacyOrder, on_delete=models.PROTECT, related_name="issues", null=True, blank=True)
+    category = models.CharField(max_length=32)
+    note = models.CharField(max_length=1000)
+    outcome = models.CharField(max_length=1000, blank=True)
+    opened_by = models.ForeignKey(AUTH_USER, on_delete=models.PROTECT, related_name="+")
+    resolved_by = models.ForeignKey(AUTH_USER, on_delete=models.PROTECT, related_name="+", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(models.Q(order__isnull=False, prescription_order__isnull=True)
+                           | models.Q(order__isnull=True, prescription_order__isnull=False)),
+                name="pharmacy_issue_single_order",
+            ),
+        ]
+
+
+class PharmacyCreditCollection(models.Model):
+    request_id = models.UUIDField(unique=True)
+    payment = models.OneToOneField("payments.PaymentTransaction", on_delete=models.PROTECT)

@@ -29,39 +29,40 @@ export function Procurement() {
         </li>)}</ul>
       ) },
     ],
-    create: { label: 'New purchase order', fields: ({ context }) => [
+    create: { label: 'New purchase order', permission: 'purchase_edit', fields: ({ context }) => [
       field('supplier', 'Supplier', 'select', { numeric: true, options: context.pharmacy_suppliers || [] }),
     ] },
     actions: (row) => [
       ...(row.status === 'draft' ? [{
-        label: 'Add medicine', action: 'add-line', fields: ({ context }) => [
-          medicine(context), field('ordered', 'Quantity', 'number', { min: 1 }),
+        label: 'Add medicine', permission: 'purchase_edit', action: 'add-line', fields: ({ context }) => [
+          medicine(context), field('ordered', 'Quantity in base units', 'number', { min: 1 }),
           field('unit_cost', 'Unit cost (UGX)', 'number', { min: 0 }),
         ],
       }] : []),
       ...(row.status === 'draft' && row.lines.length ? [{
-        label: 'Remove medicine', action: 'remove-line', fields: [
+        label: 'Remove medicine', permission: 'purchase_edit', action: 'remove-line', fields: [
           field('line', 'Order line', 'select', { numeric: true, options: row.lines.map((line) => ({ id: line.id, name: line.medicine_name })) }),
         ],
       }] : []),
       ...(row.status === 'draft' && canReview ? [
-        ...(row.lines.length ? [{ label: 'Approve order', action: 'transition', defaults: { action: 'approve' }, fields: [reason()] }] : []),
-        { label: 'Cancel order', action: 'transition', defaults: { action: 'cancel' }, fields: [reason()] },
+        ...(row.lines.length ? [{ label: 'Approve order', permission: 'purchase_approve', action: 'transition', defaults: { action: 'approve' }, fields: [reason()] }] : []),
+        { label: 'Cancel order', permission: 'purchase_approve', action: 'transition', defaults: { action: 'cancel' }, fields: [reason()] },
       ] : []),
       ...(row.status === 'approved' ? [
         ...(row.lines.some((line) => line.ordered > line.received) ? [{
-          label: 'Record delivery', action: 'receive', defaults: () => ({ reference: crypto.randomUUID() }),
+          label: 'Record delivery', permission: 'purchase_receive', action: 'receive', defaults: () => ({ reference: crypto.randomUUID() }),
           fields: [
             field('line', 'Order line', 'select', { numeric: true, options: row.lines
               .filter((line) => line.ordered > line.received)
               .map((line) => ({ id: line.id, name: `${line.medicine_name} · ${line.ordered - line.received} outstanding` })) }),
             field('batch', 'Batch reference', 'number', { min: 1 }),
             field('quantity', 'Accepted quantity', 'number', { min: 1 }),
+            field('packs', 'Quantity is in packs', 'checkbox', { required: false }),
             reason('Delivery reference and any shortages or damage'), witness,
           ],
         }] : []),
         ...(canReview ? [{
-          label: 'Close order', action: 'transition', defaults: { action: 'close' },
+          label: 'Close order', permission: 'purchase_approve', action: 'transition', defaults: { action: 'close' },
           fields: [reason('Closure reason, including any outstanding quantity')],
         }] : []),
       ] : []),
@@ -82,15 +83,15 @@ export function Stocktake() {
       { key: 'difference', label: 'Difference', render: (row) => row.counted - row.expected },
       statusColumn, { key: 'review_reason', label: 'Review note' },
     ],
-    create: { label: 'Record physical count', fields: [
+    create: { label: 'Record physical count', permission: 'stock_count', fields: [
       field('batch', 'Batch reference', 'number', { min: 1 }),
       field('counted', 'Physical quantity', 'number', { min: 0 }), reason('Count note'),
     ] },
     actions: (row) => [
       { label: 'View count', preview: true },
       ...(row.status === 'pending' && reviewRoles.has(user?.role) && row.created_by !== user.id ? [
-        { label: 'Approve count', action: 'review', defaults: { action: 'approve' }, fields: [reason('Review note'), witness] },
-        { label: 'Reject count', action: 'review', defaults: { action: 'reject' }, fields: [reason('Rejection reason')] },
+        { label: 'Approve count', permission: 'stock_approve', action: 'review', defaults: { action: 'approve' }, fields: [reason('Review note'), witness] },
+        { label: 'Reject count', permission: 'stock_approve', action: 'review', defaults: { action: 'reject' }, fields: [reason('Rejection reason')] },
       ] : []),
     ],
   }]} />
@@ -114,9 +115,9 @@ export function Formulary() {
       { key: 'dosage_form', label: 'Dosage form' }, { key: 'register_code', label: 'Register number' },
       { key: 'active', label: 'Status', render: (row) => row.active ? 'Active' : 'Inactive' },
     ],
-    create: canReview ? { label: 'Add formulary entry', fields: ({ context }) => [medicine(context), ...formularyFields] } : null,
+    create: canReview ? { label: 'Add formulary entry', permission: 'catalogue_edit', fields: ({ context }) => [medicine(context), ...formularyFields] } : null,
     actions: (row) => canReview ? [{
-      label: 'Edit entry', action: 'configure', prefill: true,
+      label: 'Edit entry', permission: 'catalogue_edit', action: 'configure', prefill: true,
       defaults: { active: false }, fields: [...formularyFields, field('active', 'Active', 'checkbox')],
     }] : [],
   }]} />

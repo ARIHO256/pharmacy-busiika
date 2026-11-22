@@ -22,10 +22,13 @@ function errorText(err) {
   return Object.entries(data).map(([field, messages]) => `${field.replaceAll('_',' ')}: ${Array.isArray(messages) ? messages.join(' ') : messages}`).join(' · ')
 }
 
-export default function Register({ pharmacyOnly = false }) {
+export default function Register({ pharmacyOnly = false, pharmacyBuyer = false, accountRole }) {
   const { register } = useAuth()
   const navigate = useNavigate()
-  const [form, setForm] = useState(() => pharmacyOnly ? { ...initial, role: 'pharmacy', organization_type: 'pharmacy' } : initial)
+  const fixedRole = pharmacyOnly ? 'pharmacy' : accountRole
+  const [form, setForm] = useState(() => ({
+    ...initial, role: fixedRole || initial.role, organization_type: pharmacyOnly ? 'pharmacy' : initial.organization_type,
+  }))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const selectedRole = useMemo(() => ROLES.find((role) => role.value === form.role), [form.role])
@@ -43,7 +46,7 @@ export default function Register({ pharmacyOnly = false }) {
         if (value !== '' && value !== null && value !== undefined) payload.append(key, value)
       })
       const user = await register(payload)
-      navigate(pharmacyOnly ? '/pharmacy/profile' : ROLE_HOME[user.role] || '/patient')
+      navigate(pharmacyBuyer ? '/shop' : pharmacyOnly ? '/pharmacy/profile' : ROLE_HOME[user.role] || '/patient')
     } catch (err) {
       setError(errorText(err))
     } finally {
@@ -54,20 +57,20 @@ export default function Register({ pharmacyOnly = false }) {
   return (
     <main className="healthos-auth-shell register-mode">
       <section className="healthos-auth-story">
-        <Link to="/" className="healthos-auth-brand"><span><HealthIcon name="heart" size={19}/></span><div><strong>MyDoctor</strong><small>{pharmacyOnly ? 'Pharmacy' : 'Connected Healthcare OS'}</small></div></Link>
+        <Link to="/" className="healthos-auth-brand"><span><HealthIcon name="heart" size={19}/></span><div><strong>MyDoctor</strong><small>{(pharmacyOnly || pharmacyBuyer) ? 'Pharmacy' : accountRole ? 'Facility' : 'Connected Healthcare OS'}</small></div></Link>
         <div className="healthos-auth-copy">
           <span className="healthos-auth-kicker">JOIN THE HEALTH NETWORK</span>
-          <h1>{pharmacyOnly ? 'Register your pharmacy.' : 'One registration flow.'}<br/><em>{pharmacyOnly ? 'Prepare your workspace.' : 'The correct workspace for every role.'}</em></h1>
-          <p>{pharmacyOnly ? 'Submit your pharmacy licence for verification. Invited staff use the link sent by their organization.' : 'Patients become active immediately. Doctors and healthcare organizations enter a protected pending-verification state until an administrator validates their licence.'}</p>
-          <div className="healthos-selected-role"><span><HealthIcon name={selectedRole?.icon || 'heart'} size={22}/></span><div><small>Selected workspace</small><strong>{selectedRole?.label}</strong><p>{selectedRole?.text}</p></div></div>
+          <h1>{pharmacyBuyer ? 'Create a buyer account.' : pharmacyOnly ? 'Register your pharmacy.' : accountRole === 'hospital' ? 'Register your facility.' : accountRole === 'patient' ? 'Create your patient account.' : 'One registration flow.'}{!accountRole && <><br/><em>{pharmacyOnly ? 'Prepare your workspace.' : 'The correct workspace for every role.'}</em></>}</h1>
+          <p>{pharmacyBuyer ? 'Find medicines, order for pickup or delivery, and track your orders.' : pharmacyOnly ? 'Submit your pharmacy licence for verification. Invited staff use the link sent by their organization.' : accountRole === 'hospital' ? 'Submit the licence for your clinic or hospital. After verification, use Staff & Access to invite your team.' : accountRole === 'patient' ? 'Use a patient account to book appointments and manage your care.' : 'Patients become active immediately. Doctors and healthcare organizations enter a protected pending-verification state until an administrator validates their licence.'}</p>
+          <div className="healthos-selected-role"><span><HealthIcon name={selectedRole?.icon || 'heart'} size={22}/></span><div><small>Selected workspace</small><strong>{pharmacyBuyer ? 'Buyer' : selectedRole?.label}</strong>{!pharmacyBuyer && <p>{selectedRole?.text}</p>}</div></div>
         </div>
         <div className="healthos-auth-trust"><span><HealthIcon name="shield" size={15}/> Private licence documents</span><span><HealthIcon name="lock" size={15}/> Role-scoped access</span></div>
       </section>
 
       <section className="healthos-auth-form-area register-form-area">
         <div className="healthos-auth-form-card register-card">
-          <div className="healthos-auth-form-head"><span className="healthos-auth-form-icon"><HealthIcon name="user" size={20}/></span><div><small>CREATE ACCOUNT</small><h2>{pharmacyOnly ? 'Register your pharmacy' : 'Register your role'}</h2><p>{pharmacyOnly ? 'Use the details on your registered pharmacy licence.' : 'Facility staff such as nurses, receptionists and cashiers join through a secure organization invitation.'}</p></div></div>
-          {!pharmacyOnly && <div className="healthos-role-picker" role="radiogroup" aria-label="Choose account role">
+          <div className="healthos-auth-form-head"><span className="healthos-auth-form-icon"><HealthIcon name="user" size={20}/></span><div><small>CREATE ACCOUNT</small><h2>{pharmacyBuyer ? 'Buyer details' : pharmacyOnly ? 'Register your pharmacy' : accountRole === 'hospital' ? 'Facility registration' : accountRole === 'patient' ? 'Patient details' : 'Register your role'}</h2><p>{pharmacyBuyer ? 'Use contact details the pharmacy can reach for your order.' : pharmacyOnly ? 'Use the details on your registered pharmacy licence.' : accountRole === 'hospital' ? 'Use the details on your facility licence.' : accountRole === 'patient' ? 'If you’re joining a staff team, use the invitation sent by your facility.' : 'Facility staff such as nurses, receptionists and cashiers join through a secure organization invitation.'}</p></div></div>
+          {!fixedRole && <div className="healthos-role-picker" role="radiogroup" aria-label="Choose account role">
             {ROLES.map((role) => <button key={role.value} type="button" className={form.role === role.value ? 'is-selected' : ''} onClick={() => setForm({ ...initial, role: role.value, email: form.email, password: form.password, first_name: form.first_name, last_name: form.last_name, phone: form.phone })} role="radio" aria-checked={form.role === role.value}><HealthIcon name={role.icon} size={18}/><span>{role.label}</span>{form.role === role.value && <HealthIcon name="check" size={15}/>}</button>)}
           </div>}
           <form onSubmit={submit} className="space-y-4" encType="multipart/form-data">
@@ -76,7 +79,7 @@ export default function Register({ pharmacyOnly = false }) {
             <Input label="Phone / contact number" required value={form.phone} onChange={set('phone')} placeholder="+256…"/>
             <Input label="Password" type="password" required minLength={10} value={form.password} onChange={set('password')} hint="Use at least 10 characters and avoid common or entirely numeric passwords."/>
 
-            {form.role === 'patient' && <div className="space-y-4 rounded-2xl border border-primary-100 bg-primary-50/40 p-4"><div><strong className="text-sm text-slate-800">Patient location</strong><p className="text-xs text-slate-500">Only the minimum details are required at registration. Medical history can be completed later.</p></div><Input label="Location / district" value={form.location} onChange={set('location')} placeholder="Kampala, Wakiso…"/><Textarea label="Address" value={form.address} onChange={set('address')}/></div>}
+            {form.role === 'patient' && <div className="space-y-4 rounded-2xl border border-primary-100 bg-primary-50/40 p-4"><div><strong className="text-sm text-slate-800">{pharmacyBuyer ? 'Location' : 'Patient location'}</strong>{!pharmacyBuyer && <p className="text-xs text-slate-500">Only the minimum details are required at registration. Medical history can be completed later.</p>}</div><Input label="Location / district" required={pharmacyBuyer && !form.address.trim()} value={form.location} onChange={set('location')} placeholder="Kampala, Wakiso…"/><Textarea label="Address" value={form.address} onChange={set('address')}/></div>}
 
             {isDoctor && <div className="space-y-4 rounded-2xl border border-violet-100 bg-violet-50/30 p-4">
               <div><strong className="text-sm text-slate-800">Professional qualification and practising licence</strong><p className="text-xs text-slate-500">All fields marked by the browser as required are needed for administrator verification.</p></div>
@@ -102,7 +105,7 @@ export default function Register({ pharmacyOnly = false }) {
             {error && <Alert tone="danger">{error}</Alert>}
             {(isDoctor || isOrganization) && <Alert tone="warning" title="Verification required">After registration you can complete your profile, but public listing, availability publishing and booking acceptance remain blocked until approval.</Alert>}
             <label className="healthos-consent-check"><input type="checkbox" required/><span>I agree to the terms, privacy notice and applicable health-data processing required to provide the service.</span></label>
-            <Button type="submit" className="w-full" disabled={busy}>{busy ? 'Creating account…' : `Create ${selectedRole?.label || ''} account`}<HealthIcon name="arrow" size={17}/></Button>
+            <Button type="submit" className="w-full" disabled={busy}>{busy ? 'Creating account…' : pharmacyBuyer ? 'Create buyer account' : `Create ${selectedRole?.label || ''} account`}<HealthIcon name="arrow" size={17}/></Button>
           </form>
           <p className="healthos-auth-switch">Already registered? <Link to="/login">Sign in</Link></p>
         </div>

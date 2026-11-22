@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useOutletContext, useSearchParams } from 'react-router-dom'
 import { operationsApi } from '../../api/endpoints'
+import { useAuth } from '../../auth/AuthContext'
 import { Alert, Button, Card, Input, Modal, Select, Spinner, Table, Textarea } from '../../components/ui'
 import { displayDate, getError, statusBadge } from '../staff/shared'
 
@@ -8,16 +10,28 @@ const sections = [
   ['procedures', 'Procedures'], ['referrals', 'Referrals'],
   ['imaging', 'Imaging'], ['offline-nodes', 'Offline review'],
 ]
+const inpatient = new Set(['admissions', 'medication-schedules', 'procedures'])
 const numberField = (key, label, required = true) => ({ key, label, type: 'number', required })
 const textField = (key, label, required = true) => ({ key, label, type: 'text', required })
 const longField = (key, label, required = true) => ({ key, label, type: 'textarea', required })
 const dateField = (key, label) => ({ key, label, type: 'datetime-local', required: true })
 
-export default function Operations({ resource }) {
+export default function Operations({ resource, resources, facilityOnly = false }) {
+  const { user } = useAuth()
+  const [searchParams] = useSearchParams()
+  const recordId = searchParams.get('record')
+  const originatingVisit = searchParams.get('visit') || ''
+  const activeFacility = useOutletContext()?.organization?.id
   const [context, setContext] = useState(null)
   const [organization, setOrganization] = useState('')
-  const [selected, setSection] = useState('admissions')
-  const section = resource || selected
+  const matching = context?.organizations.find((org) => String(org.id) === organization)
+  const availableSections = sections.filter(([key]) => {
+    if (resources && !resources.includes(key)) return false
+    if (user?.role === 'nurse' && ['referrals', 'imaging'].includes(key)) return false
+    return !matching || matching.type === 'hospital' || !inpatient.has(key)
+  })
+  const [selected, setSection] = useState('')
+  const section = resource || availableSections.find(([key]) => key === selected)?.[0] || availableSections[0]?.[0]
   const [rows, setRows] = useState([])
   const [page, setPage] = useState(1)
   const [hasNext, setHasNext] = useState(false)
@@ -41,30 +55,35 @@ export default function Operations({ resource }) {
     let active = true
     operationsApi.context().then(({ data }) => {
       if (!active) return
-      setContext(data)
-      setOrganization(String(data.organizations[0]?.id || ''))
-      if (!data.organizations.length) setLoading(false)
+      const inScope = data.organizations.filter((org) => {
+        if (facilityOnly && org.id !== activeFacility) return false
+        if (resource && inpatient.has(resource)) return org.type === 'hospital'
+        return ['clinic', 'hospital'].includes(org.type)
+      })
+      setContext({ ...data, organizations: inScope })
+      setOrganization(String(inScope[0]?.id || ''))
+      if (!inScope.length) setLoading(false)
     }).catch((err) => { if (active) { setError(getError(err)); setLoading(false) } })
     return () => { active = false }
-  }, [])
+  }, [facilityOnly, activeFacility, resource])
 
   useEffect(() => {
-    if (!organization) return undefined
+    if (!organization || !section) return undefined
     const id = ++requestId.current
     setLoading(true)
     setError('')
     Promise.all([
       operationsApi.context(organization),
-      operationsApi.list(section, { organization, page }),
+      recordId ? operationsApi.record(section, recordId) : operationsApi.list(section, { organization, page }),
     ]).then(([scope, result]) => {
       if (id !== requestId.current) return
       setContext((current) => ({ ...scope.data, organizations: current.organizations }))
-      setRows(result.data.results || [])
+      setRows(recordId ? [result.data] : result.data.results || [])
       setHasNext(Boolean(result.data.next))
     }).catch((err) => { if (id === requestId.current) setError(getError(err)) })
       .finally(() => { if (id === requestId.current) setLoading(false) })
     return () => { requestId.current += 1 }
-  }, [organization, section, page, refresh])
+  }, [organization, section, page, refresh, recordId])
 
   useEffect(() => {
     if (!modal?.patientPicker || !organization) return undefined
@@ -98,6 +117,7 @@ export default function Operations({ resource }) {
         data[field.key] = field.type === 'number' || field.numeric ? Number(value)
           : field.type === 'datetime-local' ? new Date(value).toISOString() : value
       }
+      if (!data.visit) delete data.visit
       if (modal.create) await operationsApi.create(modal.resource, { organization: Number(organization), ...data })
       else await operationsApi.action(modal.resource, modal.id, modal.action || 'transition', data)
       setModal(null)
@@ -127,7 +147,7 @@ export default function Operations({ resource }) {
 
   const createRecord = () => {
     const shared = { resource: section, create: true, title: section === 'admissions' ? 'Admit patient' : `Create ${label.toLowerCase()}` }
-    if (section === 'admissions') open({ ...shared, patientPicker: true, fields: [patientField, doctorField, { ...bedField, required: false }, longField('reason', 'Admission reason')] })
+    if (section === 'admissions') open({ ...shared, defaults: { visit: originatingVisit }, patientPicker: true, fields: [patientField, doctorField, { ...bedField, required: false }, numberField('visit', 'Originating visit ID', false), longField('reason', 'Admission reason')] })
     if (section === 'medication-schedules') open({ ...shared, fields: [numberField('admission', 'Admission ID'), numberField('prescription', 'Prescription ID'), textField('medication_name', 'Medicine'), textField('dose', 'Prescribed dose'), textField('route', 'Route'), dateField('due_at', 'Due at')] })
     if (section === 'procedures') open({ ...shared, patientPicker: true, fields: [patientField, { ...doctorField, key: 'surgeon', label: 'Surgeon' }, numberField('admission', 'Admission ID (optional)', false), textField('theatre', 'Theatre'), textField('procedure', 'Procedure'), dateField('starts_at', 'Starts at'), dateField('ends_at', 'Ends at')] })
     if (section === 'referrals') open({ ...shared, fields: [numberField('referral', 'Sent referral ID')] })
@@ -151,15 +171,17 @@ export default function Operations({ resource }) {
       {context.can_prescribe && row.status === 'scheduled' && <Button variant="outline" onClick={() => transition(row, 'in_progress')}>Start</Button>}
       {context.can_prescribe && row.status === 'in_progress' && <Button variant="outline" onClick={() => transition(row, 'completed', [longField('notes', 'Procedure outcome')])}>Complete</Button>}
     </div>
-    if (section === 'referrals' && context.can_close_referrals) return <div className="flex gap-2">
-      {row.status === 'sent' && <Button variant="outline" onClick={() => transition(row, 'accepted')}>Accept</Button>}
-      {row.status === 'sent' && <Button variant="outline" onClick={() => transition(row, 'declined', [longField('outcome', 'Reason')])}>Decline</Button>}
-      {row.status === 'accepted' && <Button variant="outline" onClick={() => transition(row, 'in_progress')}>Start</Button>}
-      {row.status === 'in_progress' && <Button variant="outline" onClick={() => transition(row, 'completed', [longField('outcome', 'Referral outcome')])}>Complete</Button>}
+    if (section === 'referrals' && context.can_close_referrals) return <div className="flex flex-wrap gap-2">
+      {row.outcome && <p>{row.outcome}</p>}
+      {context.organizations.some((org) => org.id === row.organization) && row.status === 'sent' && <Button variant="outline" onClick={() => transition(row, 'accepted')}>Accept</Button>}
+      {context.organizations.some((org) => org.id === row.organization) && row.status === 'sent' && <Button variant="outline" onClick={() => transition(row, 'declined', [longField('outcome', 'Reason')])}>Decline</Button>}
+      {context.organizations.some((org) => org.id === row.organization) && row.status === 'accepted' && <Button variant="outline" onClick={() => transition(row, 'in_progress')}>Start</Button>}
+      {context.organizations.some((org) => org.id === row.organization) && row.status === 'in_progress' && <Button variant="outline" onClick={() => transition(row, 'completed', [longField('outcome', 'Referral outcome')])}>Complete</Button>}
     </div>
-    if (section === 'imaging') return <div className="flex gap-2">
+    if (section === 'imaging') return <div className="flex flex-wrap gap-2">
+      {row.report && <p>{row.report}</p>}
       {row.status === 'ordered' && <Button variant="outline" onClick={() => transition(row, 'scheduled', [dateField('scheduled_at', 'Appointment time')])}>Schedule</Button>}
-      {context.can_report_imaging && row.status === 'scheduled' && <Button variant="outline" onClick={() => transition(row, 'acquired', [textField('study_uid', 'DICOM study UID')])}>Link acquired study</Button>}
+      {context.can_acquire_imaging && row.status === 'scheduled' && <Button variant="outline" onClick={() => transition(row, 'acquired', [textField('study_uid', 'DICOM study UID')])}>Link acquired study</Button>}
       {context.can_report_imaging && row.status === 'acquired' && <Button variant="outline" onClick={() => transition(row, 'reported', [longField('report', 'Diagnostic report')])}>Report</Button>}
     </div>
     if (section === 'offline-nodes') return <Button variant="outline" onClick={() => loadChanges(row)}>Review changes</Button>
@@ -180,18 +202,25 @@ export default function Operations({ resource }) {
     ] : []),
     ...(section === 'medication-schedules' ? [{ key: 'medication_name', label: 'Medicine' }, { key: 'dose', label: 'Dose' }, { key: 'due_at', label: 'Due', render: (row) => displayDate(row.due_at) }] : []),
     ...(section === 'procedures' ? [{ key: 'procedure', label: 'Procedure' }, { key: 'theatre', label: 'Theatre' }, { key: 'starts_at', label: 'Starts', render: (row) => displayDate(row.starts_at) }] : []),
+    ...(section === 'referrals' ? [{ key: 'specialty', label: 'Specialty' }, { key: 'reason', label: 'Reason' }] : []),
     ...(section === 'imaging' ? [{ key: 'modality', label: 'Modality' }, { key: 'body_site', label: 'Body site' }] : []),
     { key: 'status', label: 'Status', render: (row) => statusBadge(section === 'offline-nodes' ? row.active ? 'active' : 'inactive' : row.status) },
     { key: 'actions', label: 'Actions', render: actions },
   ]
 
+  if (!loading && context && !context.organizations.length) {
+    return <Alert>{resource && inpatient.has(resource)
+      ? 'A verified hospital assignment is required for this workflow.'
+      : 'A verified clinic or hospital assignment is required.'}</Alert>
+  }
+
   return <div className="space-y-5">
     {error && <Alert tone="danger">{error}</Alert>}
-    {context && <Select label="Facility" value={organization} onChange={(event) => { setOrganization(event.target.value); setPage(1); setNode(null) }}>
+    {context && !facilityOnly && <Select label="Facility" value={organization} onChange={(event) => { setOrganization(event.target.value); setPage(1); setNode(null) }}>
       {!context.organizations.length && <option value="">No verified facility membership</option>}
       {context.organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
     </Select>}
-    {!resource && <div className="flex flex-wrap gap-2">{sections.map(([key, title]) => <Button key={key} variant={section === key ? 'primary' : 'outline'} onClick={() => { setSection(key); setPage(1); setNode(null) }} aria-pressed={section === key}>{title}</Button>)}</div>}
+    {!resource && <div className="flex flex-wrap gap-2">{availableSections.map(([key, title]) => <Button key={key} variant={section === key ? 'primary' : 'outline'} onClick={() => { setSection(key); setPage(1); setNode(null) }} aria-pressed={section === key}>{title}</Button>)}</div>}
     <Card title={label} actions={<div className="flex gap-2"><Button variant="outline" disabled={loading || !organization} onClick={() => setRefresh((value) => value + 1)}>Refresh</Button>{canCreate && <Button disabled={!organization || loading || Boolean(error)} onClick={createRecord}>{section === 'admissions' ? 'Admit patient' : 'Add record'}</Button>}</div>}>
       {loading ? <Spinner /> : !error && <Table rows={rows} columns={columns} empty="No records in this facility" />}
       {(page > 1 || hasNext) && <div className="flex justify-end gap-2 mt-4"><Button variant="outline" disabled={loading || Boolean(error) || page === 1} onClick={() => setPage((value) => value - 1)}>Previous</Button><Button variant="outline" disabled={loading || Boolean(error) || !hasNext} onClick={() => setPage((value) => value + 1)}>Next</Button></div>}

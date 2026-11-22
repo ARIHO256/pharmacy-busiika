@@ -73,6 +73,7 @@ class PrescriptionListSerializer(serializers.ModelSerializer):
             "id",
             "number",
             "appointment",
+            "visit",
             "encounter",
             "doctor",
             "doctor_name",

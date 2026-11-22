@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { appointmentApi, clinicalApi, governanceApi } from '../../api/endpoints'
 import {
@@ -345,7 +346,7 @@ export default function ClinicalWorkspace() {
                       </div>
                     </div>
                   ) : (
-                    <div className="flex flex-wrap justify-end gap-2"><Button type="submit" variant="outline" disabled={saving}>{saving ? 'Saving…' : 'Save draft'}</Button><Button type="button" onClick={finalize} disabled={saving || !encounter}>Finalize & sign</Button></div>
+                    <div className="flex flex-wrap justify-end gap-2"><Link className="self-center text-sm font-semibold text-primary-700 underline" to={`/doctor/handoffs?appointment=${active.id}`}>Visit next steps</Link><Button type="submit" variant="outline" disabled={saving}>{saving ? 'Saving…' : 'Save draft'}</Button><Button type="button" onClick={finalize} disabled={saving || !encounter}>Finalize & sign</Button></div>
                   )}
                 </form>
               </Card>

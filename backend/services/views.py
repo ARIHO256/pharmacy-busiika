@@ -1,11 +1,11 @@
 from django.contrib.auth import get_user_model
 from django.db.models.deletion import ProtectedError
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Count, Exists, F, OuterRef, Q, Subquery, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status as drf_status
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -79,6 +79,20 @@ def provider_account_for(user, expected_role):
     organization = organization_for_user(user)
     if organization and organization.owner_id and organization.owner.role == expected_role:
         return organization.owner
+    if expected_role == User.Role.PHARMACY and user.role == User.Role.CASHIER:
+        from operations.access import organizations
+
+        assignments = list(organizations(user).filter(
+            organization_type="pharmacy", owner__role=User.Role.PHARMACY, owner__is_active=True,
+        ).select_related("owner")[:2])
+        if len(assignments) == 1:
+            return assignments[0].owner
+    if organization and expected_role == User.Role.PHARMACY and user.role == User.Role.PHARMACIST:
+        pharmacies = list(organization.embedded_pharmacies.filter(
+            active=True, status="verified", owner__role=expected_role, owner__is_active=True,
+        ).select_related("owner")[:2])
+        if len(pharmacies) == 1 and organization.status == "verified":
+            return pharmacies[0].owner
     return None
 
 
@@ -202,7 +216,27 @@ class MedicineListCreateView(APIView):
         ):
             qs = qs.filter(pharmacy=provider_account_for(request.user, User.Role.PHARMACY))
         if pharmacy:
-            qs = qs.filter(pharmacy_id=pharmacy)
+            pharmacy_id = serializers.IntegerField(min_value=1).run_validation(pharmacy)
+            qs = qs.filter(pharmacy_id=pharmacy_id)
+        if request.query_params.get("shop") == "1" or request.query_params.get("wholesale") == "1":
+            from operations.models import MedicineBatch
+
+            batches = MedicineBatch.objects.filter(medicine_id=OuterRef("pk"))
+            eligible = batches.filter(
+                organization__owner_id=OuterRef("pharmacy_id"), organization__organization_type="pharmacy",
+                organization__owner__is_active=True, organization__owner__role="pharmacy",
+                organization__active=True, organization__status="verified", status="available",
+                quantity__gt=0, expires_on__gt=timezone.localdate(),
+            ).filter(
+                Q(organization__parent_facility__isnull=True)
+                | Q(organization__parent_facility__active=True, organization__parent_facility__status="verified")
+            )
+            available = eligible.order_by().values("medicine_id").annotate(total=Sum("quantity")).values("total")
+            qs = qs.filter(
+                Exists(eligible), ~Exists(batches.filter(controlled=True)), sale_type=Medicine.SaleType.OTC,
+            ).annotate(shop_stock=Subquery(available))
+        if request.query_params.get("wholesale") == "1":
+            qs = qs.filter(wholesale_minimum__gte=2, wholesale_unit_price__gt=0, shop_stock__gte=F("wholesale_minimum"))
         if search:
             qs = qs.filter(name__icontains=search)
         ser = MedicineSerializer(qs, many=True, context={"request": request})
@@ -216,6 +250,9 @@ class MedicineListCreateView(APIView):
         if not ser.is_valid():
             return err(str(ser.errors))
         med = ser.save(pharmacy=pharmacy_account)
+        from governance.services import audit
+        audit(actor=request.user, action="pharmacy.catalogue.created", resource=med, purpose="operations",
+              metadata={"pharmacy_id": pharmacy_account.pk, "name": med.name}, request=request)
         return Response(
             MedicineSerializer(med, context={"request": request}).data,
             status=drf_status.HTTP_201_CREATED,
@@ -235,6 +272,8 @@ class MedicineDetailView(APIView):
 
     @transaction.atomic
     def put(self, request, pk):
+        if request.user.role != User.Role.PHARMACY:
+            raise PermissionDenied("Only the pharmacy owner can edit saved catalogue items.")
         med = self._get_own(request, pk)
         if med is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
@@ -242,19 +281,31 @@ class MedicineDetailView(APIView):
         ser = MedicineSerializer(med, data=request.data, partial=True, context={"request": request})
         if not ser.is_valid():
             return err(str(ser.errors))
-        ser.save()
+        before = {key: getattr(med, key) for key in ("price", "wholesale_unit_price", "wholesale_minimum", "units_per_pack", "sale_type")}
+        updated = ser.save()
+        changes = {key: {"before": value, "after": getattr(updated, key)} for key, value in before.items() if value != getattr(updated, key)}
+        from governance.services import audit
+        audit(actor=request.user, action="pharmacy.catalogue.updated", resource=updated, purpose="operations",
+              metadata={"pharmacy_id": updated.pharmacy_id, "changes": changes, "fields": sorted(ser.validated_data)}, request=request)
         return Response(ser.data)
 
     patch = put
 
+    @transaction.atomic
     def delete(self, request, pk):
+        if request.user.role != User.Role.PHARMACY:
+            raise PermissionDenied("Only the pharmacy owner can delete catalogue items.")
         med = self._get_own(request, pk)
         if med is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
         if med.batches.exists():
             return err("Medicines with batch history cannot be deleted.", 409)
+        from governance.services import audit
         try:
-            med.delete()
+            with transaction.atomic():
+                audit(actor=request.user, action="pharmacy.catalogue.deleted", resource=med, purpose="operations",
+                      metadata={"pharmacy_id": med.pharmacy_id, "name": med.name}, request=request)
+                med.delete()
         except ProtectedError:
             return err("This medicine is referenced in pharmacy records and cannot be deleted.", 409)
         return Response(status=drf_status.HTTP_204_NO_CONTENT)
@@ -263,7 +314,20 @@ class MedicineDetailView(APIView):
 # ---------------------------------------------------------------------------
 # PHARMACY — cart
 # ---------------------------------------------------------------------------
+def enforce_wholesale(medicine, quantity, *, wholesale_only):
+    minimum = medicine.wholesale_minimum
+    if wholesale_only and (not minimum or not medicine.wholesale_unit_price):
+        raise ValidationError(f"{medicine.name} is not offered for wholesale ordering.")
+    if minimum and quantity < minimum:
+        raise ValidationError(f"{medicine.name} requires at least {minimum} units per wholesale order.")
+
+
+def buyer_unit_price(medicine):
+    return medicine.wholesale_unit_price if medicine.wholesale_minimum else medicine.price
+
+
 class CartListCreateView(APIView):
+    wholesale_only = False
     permission_classes = [IsRole]
     allowed_roles = [User.Role.PATIENT]
 
@@ -271,21 +335,23 @@ class CartListCreateView(APIView):
         qs = CartItem.objects.filter(patient=request.user).select_related("medicine")
         return Response(CartItemSerializer(qs, many=True, context={"request": request}).data)
 
+    @transaction.atomic
     def post(self, request):
-        medicine_id = request.data.get("medicine_id")
-        try:
-            qty = int(request.data.get("qty", 1))
-        except (TypeError, ValueError):
-            return err("qty must be an integer.")
-        if qty < 1:
-            return err("qty must be at least 1.")
-        medicine = Medicine.objects.filter(pk=medicine_id).first()
+        medicine_id = serializers.IntegerField(min_value=1).run_validation(request.data.get("medicine_id"))
+        qty = serializers.IntegerField(min_value=1, max_value=1000000).run_validation(request.data.get("qty", 1))
+        User.objects.select_for_update().get(pk=request.user.pk)
+        medicine = Medicine.objects.select_for_update().filter(pk=medicine_id).first()
         if medicine is None:
             return err("Medicine not found.", drf_status.HTTP_404_NOT_FOUND)
         from operations.services import online_orderable_batches
-        if not online_orderable_batches(medicine).filter(quantity__gt=0).exists():
+        available = online_orderable_batches(medicine).aggregate(total=Sum("quantity"))["total"] or 0
+        if not available:
             return err("Online ordering requires classified OTC stock in an available batch at a verified pharmacy.", 409)
         item = CartItem.objects.filter(patient=request.user, medicine=medicine).first()
+        requested = qty + (item.qty if item else 0)
+        enforce_wholesale(medicine, requested, wholesale_only=self.wholesale_only)
+        if requested > min(available, 1000000):
+            return err("The requested quantity exceeds available stock or the order limit.", 409)
         if item is not None:
             item.qty += qty
             item.save(update_fields=["qty"])
@@ -301,7 +367,9 @@ class CartDetailView(APIView):
     permission_classes = [IsRole]
     allowed_roles = [User.Role.PATIENT]
 
+    @transaction.atomic
     def delete(self, request, pk):
+        User.objects.select_for_update().get(pk=request.user.pk)
         item = CartItem.objects.filter(pk=pk, patient=request.user).first()
         if item is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)
@@ -313,13 +381,14 @@ class CartDetailView(APIView):
 # PHARMACY — orders
 # ---------------------------------------------------------------------------
 class CheckoutView(APIView):
+    wholesale_only = False
     permission_classes = [IsRole]
     allowed_roles = [User.Role.PATIENT]
 
     @transaction.atomic
     def post(self, request):
-        delivery = bool(request.data.get("delivery", False))
-        address = request.data.get("address", "") or ""
+        delivery = serializers.BooleanField().run_validation(request.data.get("delivery", False))
+        address = serializers.CharField(max_length=255, allow_blank=True).run_validation(request.data.get("address") or "")
         if delivery and not address:
             return err("address is required when delivery is requested.")
         User.objects.select_for_update().get(pk=request.user.pk)
@@ -328,16 +397,21 @@ class CheckoutView(APIView):
             return err("Cart is empty.")
 
         locked_medicines = {med.pk: med for med in Medicine.objects.select_for_update().filter(pk__in=[item.medicine_id for item in cart]).order_by("pk")}
+        if any(item.medicine_id not in locked_medicines for item in cart):
+            return err("The catalogue changed. Refresh the cart and try again.", 409)
         for item in cart:
             item.medicine = locked_medicines[item.medicine_id]
 
         groups = {}
         for item in cart:
+            enforce_wholesale(item.medicine, item.qty, wholesale_only=self.wholesale_only)
             groups.setdefault(item.medicine.pharmacy_id, []).append(item)
 
         orders = []
         for pharmacy_id, items in groups.items():
-            total = sum(i.medicine.price * i.qty for i in items)
+            total = sum(buyer_unit_price(i.medicine) * i.qty for i in items)
+            if total > 2147483647 or any(i.qty < 1 or i.medicine.price < 0 for i in items):
+                raise ValidationError("This cart exceeds the order limit or contains invalid items.")
             order = Order.objects.create(
                 patient=request.user,
                 pharmacy_id=pharmacy_id,
@@ -350,7 +424,7 @@ class CheckoutView(APIView):
                     order=order,
                     medicine=i.medicine,
                     name=i.medicine.name,
-                    price=i.medicine.price,
+                    price=buyer_unit_price(i.medicine),
                     qty=i.qty,
                 )
                 from operations.services import allocate_order_stock
@@ -379,7 +453,9 @@ class OrderListView(APIView):
             qs = Order.objects.filter(pharmacy=pharmacy_account)
         else:
             qs = Order.objects.filter(patient=request.user)
-        qs = qs.prefetch_related("items").order_by("-created_at")
+        qs = qs.select_related("invoice", "pharmacy", "patient").prefetch_related("items", "invoice__payments").annotate(
+            open_issues=Count("issues", filter=Q(issues__resolved_at__isnull=True)),
+        ).order_by("-created_at")
         return Response(OrderSerializer(qs, many=True, context={"request": request}).data)
 
 
@@ -427,6 +503,8 @@ class OrderUpdateView(APIView):
         new_status = request.data.get("status")
         if new_status not in self.ALLOWED:
             return err("Select a valid order status.")
+        if (new_status == Order.Status.CANCELLED or request.data.get("pickup_instructions")) and request.user.role != User.Role.PHARMACY:
+            raise PermissionDenied("Only the pharmacy owner can cancel saved orders or edit pickup instructions.")
         if new_status == order.status:
             return Response(OrderSerializer(order, context={"request": request}).data)
         transitions = {
@@ -444,6 +522,11 @@ class OrderUpdateView(APIView):
             restore_order_stock(order, request.user)
         order.status = new_status
         fields = ["status"]
+        if new_status == Order.Status.READY:
+            order.pickup_instructions = serializers.CharField(max_length=500, allow_blank=True).run_validation(
+                request.data.get("pickup_instructions", ""),
+            )
+            fields.append("pickup_instructions")
         if new_status in {"ready", "dispatched"}:
             ensure_handover_stock_safe(order)
         if new_status == "delivered":
@@ -451,6 +534,9 @@ class OrderUpdateView(APIView):
             fields += HANDOVER_FIELDS
         order.save(update_fields=fields)
         event(order, request.user, "order.transition", status=new_status)
+        from governance.services import audit
+        audit(actor=request.user, action=f"pharmacy.order.{new_status}", resource=order, patient=order.patient,
+              metadata={"pharmacy_id": pharmacy_account.pk}, purpose="operations", request=request)
         return Response(OrderSerializer(order, context={"request": request}).data)
 
 
@@ -465,7 +551,9 @@ class PharmacyOrderListView(APIView):
         pharmacy_account, denied = require_provider_account(request, User.Role.PHARMACY)
         if denied:
             return denied
-        qs = PharmacyOrder.objects.filter(pharmacy=pharmacy_account).order_by("-created_at")
+        qs = PharmacyOrder.objects.filter(pharmacy=pharmacy_account).annotate(
+            open_issues=Count("issues", filter=Q(issues__resolved_at__isnull=True)),
+        ).order_by("-created_at")
         return Response(PharmacyOrderSerializer(qs, many=True, context={"request": request}).data)
 
 
@@ -541,12 +629,19 @@ class PharmacyOrderUpdateView(APIView):
         if new_status == "delivered":
             from operations.access import require_role
             require_role(request.user, {"pharmacist"})
+        previous = order.status
         order.status = new_status
         fields = ["status"]
         if new_status == "delivered" and order.handed_over_at is None:
             record_handover(request, order)
             fields += HANDOVER_FIELDS
         order.save(update_fields=fields)
+        from workforce.handoffs import update_pharmacy_handoff
+
+        update_pharmacy_handoff(order)
+        if previous != new_status:
+            from operations.services import event
+            event(order, request.user, "pharmacy.prescription_status_changed", previous=previous, status=new_status)
         return Response(PharmacyOrderSerializer(order, context={"request": request}).data)
 
 
@@ -815,6 +910,10 @@ class LabOrderListCreateView(APIView):
             specimen_type=str(request.data.get("specimen_type", "")).strip() or test.sample_type,
             prescription_id=request.data.get("prescription_id") or None,
         )
+        if visit:
+            from workforce.handoffs import track_lab_order
+
+            track_lab_order(order)
         if visit and visit.status in {PatientVisit.Status.IN_CONSULTATION, PatientVisit.Status.WAITING_CLINICIAN}:
             visit.status = PatientVisit.Status.LABORATORY
             visit.save(update_fields=["status", "updated_at"])
@@ -919,6 +1018,10 @@ class LabOrderUpdateView(APIView):
             audit(actor=request.user, patient=order.patient, resource=order, purpose="treatment",
                   action="laboratory.specimen.rejected" if new_status == LabOrder.Status.REJECTED else "laboratory.specimen.recollection_requested",
                   metadata={"order_id": order.pk}, request=request)
+        if previous_status != order.status:
+            from workforce.handoffs import update_lab_handoff
+
+            update_lab_handoff(order, request.user)
         if order.result_released and previous_status != order.status:
             try:
                 from communication.services import notify
@@ -1049,6 +1152,9 @@ class LabResultListCreateView(APIView):
         else:
             order.status = LabOrder.Status.AWAITING_VALIDATION
             order.save(update_fields=["status", "updated_at"])
+        from workforce.handoffs import update_lab_handoff
+
+        update_lab_handoff(order, request.user)
         try:
             from communication.services import notify
             body = "A laboratory result is ready. Please open MyDoctor to review it securely."
@@ -1293,6 +1399,13 @@ class HospitalBookingUpdateView(APIView):
         return Response(HospitalBookingSerializer(booking).data)
 
 
+def allow_inpatient_bed_changes(user, provider):
+    organization = organization_for_user(user)
+    provider_type = getattr(getattr(provider, "provider_profile", None), "organization_type", None)
+    if (organization and organization.organization_type == "clinic") or provider_type == "clinic":
+        raise PermissionDenied("Bed management is available at hospitals.")
+
+
 class BedListCreateView(APIView):
     allowed_roles = [User.Role.HOSPITAL, User.Role.RECEPTIONIST, User.Role.FACILITY_MANAGER]
 
@@ -1309,6 +1422,10 @@ class BedListCreateView(APIView):
             qs = Bed.objects.filter(hospital=provider_account_for(request.user, User.Role.HOSPITAL))
         else:
             return err("hospital query parameter is required.")
+        from registry.models import Organization
+        clinic_owner_ids = Organization.objects.filter(organization_type="clinic").values("owner_id")
+        qs = qs.exclude(hospital_id__in=clinic_owner_ids.filter(owner__isnull=False))
+        qs = qs.exclude(hospital__provider_profile__organization_type="clinic")
         return Response(BedSerializer(qs.order_by("ward", "label"), many=True).data)
 
     def post(self, request):
@@ -1318,6 +1435,7 @@ class BedListCreateView(APIView):
         hospital_account, denied = require_provider_account(request, User.Role.HOSPITAL)
         if denied:
             return denied
+        allow_inpatient_bed_changes(request.user, hospital_account)
         bed = ser.save(hospital=hospital_account)
         return Response(BedSerializer(bed).data, status=drf_status.HTTP_201_CREATED)
 
@@ -1330,6 +1448,7 @@ class BedDetailView(APIView):
         hospital_account = provider_account_for(request.user, User.Role.HOSPITAL)
         if hospital_account is None:
             return None
+        allow_inpatient_bed_changes(request.user, hospital_account)
         return Bed.objects.filter(pk=pk, hospital=hospital_account).first()
 
     def put(self, request, pk):
@@ -1364,6 +1483,7 @@ class BedToggleView(APIView):
         hospital_account, denied = require_provider_account(request, User.Role.HOSPITAL)
         if denied:
             return denied
+        allow_inpatient_bed_changes(request.user, hospital_account)
         bed = Bed.objects.select_for_update().filter(pk=pk, hospital=hospital_account).first()
         if bed is None:
             return err("Not found.", drf_status.HTTP_404_NOT_FOUND)

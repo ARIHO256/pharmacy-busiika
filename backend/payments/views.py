@@ -280,6 +280,16 @@ class MockWebhookView(APIView):
         return Response({"status": "paid"})
 
 
+def pharmacy_billing_permission(user, organization, *capabilities):
+    if user.role != "cashier" or not organization or organization.organization_type != "pharmacy":
+        return
+    from operations.access import require_organization
+    from services.pharmacy_permissions import require_pharmacy_permission
+
+    require_organization(user, organization.pk)
+    require_pharmacy_permission(user, organization.owner_id, *capabilities)
+
+
 class InvoiceListView(APIView):
     permission_classes = [IsRole]
     allowed_roles = INVOICE_VIEW_ROLES
@@ -297,6 +307,7 @@ class InvoiceListView(APIView):
             organization = organization_for_user(user, request.query_params.get("organization"))
             if organization is None:
                 return Response([])
+            pharmacy_billing_permission(user, organization, "orders")
             invoices = invoices.filter(organization=organization)
         status_value = request.query_params.get("status")
         if status_value:
@@ -315,6 +326,7 @@ class ReceiptView(APIView):
             Invoice.objects.select_related("patient", "organization", "appointment__doctor"),
             pk=pk,
         )
+        pharmacy_billing_permission(request.user, invoice.organization, "orders", "receipt_print")
         involved = request.user == invoice.patient
         if invoice.appointment is not None and request.user == invoice.appointment.doctor:
             involved = True
@@ -365,6 +377,7 @@ class ReceiptDetailView(APIView):
             pk=pk,
         )
         invoice = receipt.payment.invoice
+        pharmacy_billing_permission(request.user, invoice.organization, "orders", "receipt_print")
         if request.user.role == "patient" and invoice.patient_id != request.user.id:
             return Response({"detail": "Not allowed."}, status=403)
         if request.user.role == "doctor" and (
@@ -394,6 +407,7 @@ class CashierInvoiceListCreateView(APIView):
             ).first()
         if not organization:
             return Response({"detail": "No organization is in scope."}, status=400)
+        pharmacy_billing_permission(request.user, organization, "orders")
         invoices = (
             Invoice.objects.filter(organization=organization)
             .select_related("patient", "appointment__doctor", "organization", "issued_by")
@@ -415,14 +429,25 @@ class CashierInvoiceListCreateView(APIView):
             organization = Organization.objects.filter(pk=request.data["organization"]).first()
         if not organization:
             return Response({"detail": "No organization is in scope."}, status=400)
+        pharmacy_billing_permission(request.user, organization, "orders", "payment")
         serializer = CashierInvoiceCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         items = data.pop("items")
+        visit = None
+        if data.get("visit"):
+            from workforce.models import PatientVisit
+
+            visit = PatientVisit.objects.select_for_update().filter(
+                pk=data["visit"], organization=organization, patient=data["patient"],
+            ).exclude(status__in=["completed", "cancelled"]).first()
+            if not visit or data.get("appointment") and visit.appointment_id != data["appointment"].pk:
+                return Response({"detail": "Select an open visit for this patient at this facility."}, status=400)
         invoice = Invoice.objects.create(
+            visit=visit,
             patient=data["patient"],
             organization=organization,
-            appointment=data.get("appointment"),
+            appointment=visit.appointment if visit else data.get("appointment"),
             issued_by=request.user,
             discount_amount=data.get("discount_amount", 0),
             tax_amount=data.get("tax_amount", 0),
@@ -469,6 +494,7 @@ class CashierRecordPaymentView(APIView):
             request.user, invoice.organization_id
         ) is None:
             return Response({"detail": "This invoice is outside your organization."}, status=403)
+        pharmacy_billing_permission(request.user, invoice.organization, "orders", "payment")
         method = request.data.get("method")
         if method not in PaymentTransaction.Method.values:
             return Response({"detail": "Invalid payment method."}, status=400)
@@ -523,7 +549,7 @@ class CashierShiftListCreateView(APIView):
     @property
     def allowed_roles(self):
         if self.request.method in {"GET", "HEAD", "OPTIONS"}:
-            return set(CASHIER_ROLES) | FACILITY_MANAGEMENT_ROLES
+            return set(CASHIER_ROLES) | FACILITY_MANAGEMENT_ROLES | {"hospital"}
         return CASHIER_ROLES
 
     def get(self, request):
@@ -532,6 +558,7 @@ class CashierShiftListCreateView(APIView):
         )
         if not organization:
             return Response({"detail": "No organization is in scope."}, status=400)
+        pharmacy_billing_permission(request.user, organization, "shifts")
         shifts = CashierShift.objects.filter(organization=organization).select_related(
             "cashier", "organization"
         )
@@ -543,6 +570,7 @@ class CashierShiftListCreateView(APIView):
         organization = organization_for_user(request.user, request.data.get("organization"))
         if not organization:
             return Response({"detail": "No organization is in scope."}, status=400)
+        pharmacy_billing_permission(request.user, organization, "shifts", "shift_manage")
         if CashierShift.objects.filter(
             cashier=request.user, organization=organization, status=CashierShift.Status.OPEN
         ).exists():
@@ -572,6 +600,7 @@ class CashierShiftCloseView(APIView):
         )
         if request.user.role != "admin" and shift.cashier_id != request.user.id:
             return Response({"detail": "Only the cashier who opened the shift may close it."}, status=403)
+        pharmacy_billing_permission(request.user, shift.organization, "shifts", "shift_manage")
         if shift.status != CashierShift.Status.OPEN:
             return Response({"detail": "Shift is already closed."}, status=409)
         cash_received = (

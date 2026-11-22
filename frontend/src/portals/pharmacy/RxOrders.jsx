@@ -1,3 +1,5 @@
+import OrderIssues from './OrderIssues'
+import { usePharmacyPermissions } from './PharmacyPermissions'
 import { PrescriptionAction, PrescriptionLabels } from './PrescriptionActions'
 import { useState } from 'react'
 import { useAuth } from '../../auth/AuthContext'
@@ -6,9 +8,12 @@ import { Alert, Button, Card, Input, Modal, Select, Spinner } from '../../compon
 import { errMsg, fmtDate, LoadingOrError, StatusBadge, useApi } from './shared'
 
 export default function RxOrders() {
+  const allows = usePharmacyPermissions()
   const { data: orders, loading, error, reload } = useApi(() => servicesApi.pharmacyOrders())
   const { user } = useAuth()
-  const { data: products } = useApi(() => servicesApi.medicines())
+  const { data: products } = useApi(() => allows('inventory') ? servicesApi.medicines() : Promise.resolve({ data: [] }), [allows('inventory')])
+  const [issues, setIssues] = useState(null)
+  const [exceptionsOnly, setExceptionsOnly] = useState(false)
   const [clinicalAction, setClinicalAction] = useState(null)
   const [labels, setLabels] = useState(null)
   const [updating, setUpdating] = useState(null)
@@ -85,13 +90,16 @@ export default function RxOrders() {
   return (
     <LoadingOrError loading={loading} error={error}>
       {actionError && !dispensing && !reversing && <Alert tone="danger" className="mb-4">{actionError}</Alert>}
+      <div className="mb-3 flex justify-end"><Button variant="outline" aria-pressed={exceptionsOnly}
+        onClick={() => setExceptionsOnly(!exceptionsOnly)}>{exceptionsOnly ? 'Show all prescriptions' : 'Show open issues'}</Button></div>
+      {issues && <OrderIssues order={issues} kind="rx" canWrite={allows('rx_manage') && user?.role === 'pharmacist'} onClose={() => { setIssues(null); reload() }} />}
       {!orders?.length ? (
         <Card>
           <div className="text-sm text-slate-400 text-center py-8">No prescription orders yet</div>
         </Card>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {orders.map((o) => (
+          {orders.filter((row) => !exceptionsOnly || row.open_issues).map((o) => (
             <Card
               key={o.id}
               title={
@@ -99,7 +107,9 @@ export default function RxOrders() {
                   Rx Order <span className="text-primary-600">#{o.id}</span>
                 </span>
               }
-              actions={<StatusBadge status={o.status} />}
+              actions={<div className="flex gap-2"><StatusBadge status={o.status} /><Button variant="outline" onClick={() => setIssues(o)}>
+                {o.open_issues ? `Issues (${o.open_issues})` : 'Issues'}
+              </Button></div>}
             >
               <div className="space-y-4">
                 <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
@@ -155,7 +165,7 @@ export default function RxOrders() {
                   </p>)}
                   <Button variant="outline" onClick={() => setLabels(o)}>Dispensing labels</Button>
                 </div>}
-                {(o.status === 'new' || o.status === 'prepared') && (
+                {allows('rx_manage') && (o.status === 'new' || o.status === 'prepared') && (
                   <div className="flex flex-wrap justify-end gap-2">
                     {o.status === 'new' && (
                       <>
@@ -169,7 +179,7 @@ export default function RxOrders() {
                     )}
                     {o.status === 'prepared' && user?.role === 'pharmacist' && <>
                       <Button variant="outline" onClick={() => setClinicalAction({ mode: 'review', order: o })}>Record review</Button>
-                      {o.prescription_items.some((entry) => !entry.dispensed_quantity) && (
+                      {allows('inventory') && o.prescription_items.some((entry) => !entry.dispensed_quantity) && (
                         <Button variant="outline" onClick={() => setClinicalAction({ mode: 'substitute', order: o })}>Request substitution</Button>
                       )}
                     </>}

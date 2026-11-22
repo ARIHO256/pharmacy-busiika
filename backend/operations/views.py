@@ -47,6 +47,42 @@ class BaseView(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.CreateMo
     pagination_class = Pagination
     roles = set()
     model = None
+    organization_types = None
+    pharmacy_page = None
+    pharmacy_actions = {}
+
+    def pharmacy_capabilities(self, *, read_only=False):
+        action = None if read_only else self.pharmacy_actions.get(self.action)
+        return tuple(key for key in (self.pharmacy_page, action) if key)
+
+    def organization_scope(self):
+        scope = organizations(self.request.user)
+        if self.organization_types:
+            scope = scope.filter(organization_type__in=self.organization_types)
+        if not self.pharmacy_page:
+            return scope
+        from services.pharmacy_permissions import DEFAULTS, permits
+        required = self.pharmacy_capabilities(read_only=True)
+        actor = self.request.user
+        if actor.role not in DEFAULTS:
+            return scope
+        ids = [org.pk for org in scope if permits(actor, org.owner_id, *required)]
+        return scope.filter(pk__in=ids)
+
+    def check_organization_type(self, organization):
+        if self.organization_types and organization.organization_type not in self.organization_types:
+            raise PermissionDenied("This workflow is available at hospitals.")
+
+    def check_pharmacy_policy(self, organization):
+        if self.pharmacy_page:
+            from services.pharmacy_permissions import require_pharmacy_permission
+            require_pharmacy_permission(self.request.user, organization.owner_id, *self.pharmacy_capabilities())
+
+    def get_object(self):
+        obj = super().get_object()
+        if self.pharmacy_page:
+            self.check_pharmacy_policy(obj.organization)
+        return obj
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -56,10 +92,12 @@ class BaseView(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.CreateMo
         return self.roles
 
     def get_queryset(self):
-        qs = self.model.objects.filter(organization__in=organizations(self.request.user)).order_by("-pk")
+        qs = self.model.objects.filter(organization__in=self.organization_scope()).order_by("-pk")
         org_id = self.request.query_params.get("organization")
         if org_id:
             org = require_organization(self.request.user, org_id)
+            self.check_organization_type(org)
+            self.check_pharmacy_policy(org)
             qs = qs.filter(organization=org)
         return qs
 
@@ -69,6 +107,8 @@ class BaseView(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.CreateMo
         serializer.is_valid(raise_exception=True)
         organization = serializer.validated_data.get("organization")
         require_organization(request.user, organization.pk, self.roles)
+        self.check_organization_type(organization)
+        self.check_pharmacy_policy(organization)
         try:
             with transaction.atomic():
                 obj = self.create_record(serializer)
@@ -93,6 +133,7 @@ class BaseView(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.CreateMo
 
 
 class AdmissionView(BaseView):
+    organization_types = {"hospital"}
     model, serializer_class = m.Admission, s.AdmissionSerializer
     roles = {"hospital", "doctor", "nurse", "receptionist", "facility_manager"}
 
@@ -106,6 +147,7 @@ class AdmissionView(BaseView):
 
 
 class MedicationScheduleView(BaseView):
+    organization_types = {"hospital"}
     model, serializer_class = m.MedicationSchedule, s.MedicationScheduleSerializer
     roles = {"doctor", "nurse", "facility_manager"}
 
@@ -116,6 +158,7 @@ class MedicationScheduleView(BaseView):
 
 
 class ProcedureView(BaseView):
+    organization_types = {"hospital"}
     model, serializer_class = m.ProcedureBooking, s.ProcedureSerializer
     roles = {"doctor", "nurse", "hospital", "facility_manager"}
 
@@ -137,6 +180,8 @@ class ProcedureView(BaseView):
 
 
 class BatchView(BaseView):
+    pharmacy_page = "stock-control"
+    pharmacy_actions = {"create": "stock_receive", "transition": "stock_safety"}
     model, serializer_class = m.MedicineBatch, s.BatchSerializer
     roles = {"pharmacy", "pharmacist", "storekeeper", "facility_manager"}
 
@@ -153,6 +198,9 @@ class BatchView(BaseView):
         if not medicine.batches.exists() and medicine.stock:
             raise ValidationError("Reconcile existing untracked stock to zero before enabling batch tracking; then receive it into identified batches.")
         quantity = serializer.validated_data.pop("opening_quantity", 0)
+        quantity += services.pack_units(medicine, serializer.validated_data.pop("opening_packs", 0))
+        if quantity > 2147483647:
+            raise ValidationError("Opening quantity exceeds the stock limit.")
         witness = serializer.validated_data.pop("opening_witness", None)
         batch = super().create_record(serializer)
         if quantity:
@@ -165,7 +213,22 @@ class BatchView(BaseView):
 
     @action(detail=True, methods=["post"])
     def movement(self, request, pk=None):
-        movement = services.move_stock(self.get_object(), request.user, **validated(s.MovementInput, request))
+        from services.pharmacy_permissions import require_pharmacy_permission
+
+        batch = self.get_object()
+        values = validated(s.MovementInput, request)
+        if values.pop("packs"):
+            if values["kind"] != "received":
+                raise ValidationError("Pack entry is available for receiving stock.")
+            from services.models import Medicine
+            medicine = Medicine.objects.select_for_update().get(pk=batch.medicine_id)
+            values["quantity"] = services.pack_units(medicine, values["quantity"])
+        kind = values["kind"]
+        capability = {"received": "stock_receive", "dispensed": "stock_dispense"}.get(kind, "stock_adjust")
+        if kind == "dispensed":
+            require_role(request.user, {"pharmacist"})
+        require_pharmacy_permission(request.user, batch.organization.owner_id, capability)
+        movement = services.move_stock(batch, request.user, **values)
         cls = s.serializer_for(m.StockMovement)
         return Response(cls(movement).data)
 

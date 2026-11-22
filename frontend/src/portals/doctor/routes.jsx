@@ -1,3 +1,4 @@
+import PharmacyClarifications from './PharmacyClarifications'
 import PharmacySubstitutions from './PharmacySubstitutions'
 import Operations from '../facility/Operations'
 import Dashboard from './Dashboard'
@@ -11,6 +12,7 @@ import ClinicalWorkspace from './ClinicalWorkspace'
 import LabReferrals from './LabReferrals'
 
 export const nav = [
+  { to: '/doctor/pharmacy-clarifications', label: 'Pharmacy Clarifications', icon: 'prescription', group: 'Care delivery' },
   { to: '/doctor/operations', label: 'Facility Operations', icon: 'clipboard', group: 'Care delivery', description: 'Review and manage operational workflows' },
   { to: '/doctor', label: 'Clinical Home', icon: 'dashboard', end: true, group: 'Overview', description: 'Today, alerts and performance' },
   { to: '/doctor/availability', label: 'Availability', icon: 'clock', group: 'Scheduling', description: 'Working hours, breaks and holidays' },
@@ -26,6 +28,9 @@ export const nav = [
 ]
 
 export const routes = [
+  { path: 'pharmacy-clarifications', element: <PharmacyClarifications /> },
+  { path: 'imaging', element: <Operations key="imaging" resource="imaging" /> },
+  { path: 'admissions', element: <Operations key="admissions" resource="admissions" /> },
   { path: 'referrals', element: <Operations key="referrals" resource="referrals" /> },
   { path: 'operations', element: <Operations /> },
   { index: true, element: <Dashboard /> },

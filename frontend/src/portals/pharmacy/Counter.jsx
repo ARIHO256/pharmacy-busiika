@@ -1,3 +1,4 @@
+import { usePharmacyPermissions } from './PharmacyPermissions'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
@@ -9,6 +10,8 @@ import { errMsg, LoadingOrError, money, useApi } from './shared'
 const methods = [['cash', 'Cash'], ['mobile_money', 'Mobile money'], ['card', 'Card terminal'], ['bank', 'Bank transfer']]
 
 export default function Counter() {
+  const allows = usePharmacyPermissions()
+  const canSell = allows('sell')
   const { user } = useAuth()
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
@@ -57,6 +60,8 @@ export default function Counter() {
         <Button type="submit">Search</Button>
       </form>
       <LoadingOrError loading={catalog.loading} error={catalog.error}>
+        {catalog.data?.length > 0 && !catalog.data.some((row) => row.sale_type === 'otc' && row.stock > 0) &&
+          <Alert tone="warning">No sellable OTC stock in these results. Ask the pharmacy owner or pharmacist to check the medicine classification and receive stock into an available, unexpired batch.</Alert>}
         <Table rows={catalog.data || []} empty="No matching medicines" columns={[
           { key: 'name', label: 'Medicine' },
           { key: 'price', label: 'Unit price', render: (row) => money(row.price) },
@@ -65,16 +70,17 @@ export default function Counter() {
             if (row.sale_type !== 'otc') return user?.role === 'cashier' ? 'Refer to pharmacist' :
               <Link className="text-primary-700 underline" to={user?.role === 'pharmacy' ? '/pharmacy/rx-orders' : '/pharmacist/rx-orders'}>Prescription queue</Link>
             if (!row.stock) return 'No eligible stock'
+            if (!canSell) return `${row.stock} available`
             return <Button variant="outline" disabled={busy || items.some((item) => item.id === row.id)}
               onClick={() => add(row)}>Add · {row.stock} available</Button>
           } },
         ]} />
       </LoadingOrError>
     </Card>
-    <Card title="Walk-in sale" subtitle="OTC sales can be completed without a customer account. Stock is allocated by earliest expiry.">
+    {canSell && <Card title="Walk-in sale" subtitle="OTC sales can be completed without a customer account. Stock is allocated by earliest expiry.">
       <form className="space-y-4" onSubmit={complete}>
         {items.map((item) => <div key={item.id} className="grid items-end gap-2 border-b pb-3 sm:grid-cols-[1fr_6rem_auto]">
-          <div><p className="font-semibold">{item.name}</p><p className="text-sm text-slate-600">{money(item.price)} each</p></div>
+          <div><p className="font-semibold">{item.name}</p><p className="text-sm text-slate-600">{money(item.price)} per {item.unit_label || 'unit'}</p></div>
           <Input required disabled={busy} type="number" min="1" max={item.stock} label={`Quantity for ${item.name}`}
             value={item.quantity} onChange={(event) => {
               resetRequest()
@@ -85,6 +91,7 @@ export default function Counter() {
             setItems((current) => current.filter((row) => row.id !== item.id))
           }}>Remove</Button>
         </div>)}
+        {!items.length && <p className="text-sm text-slate-600">Add a medicine with available stock to enter its quantity and record payment.</p>}
         <p className="text-lg font-semibold">Total {money(total)}</p>
         <Select label="Payment received by" disabled={busy} value={method} onChange={(event) => {
           resetRequest()
@@ -93,14 +100,14 @@ export default function Counter() {
         }}>
           {methods.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </Select>
-        {method !== 'cash' && <Input required disabled={busy} label="Payment reference" maxLength={120} value={reference}
+        {method !== 'cash' && <Input required disabled={busy} label="Payment reference" hint="Enter the transaction reference from the payment already received." maxLength={120} value={reference}
           onChange={(event) => { resetRequest(); setReference(event.target.value) }} />}
         {error && <Alert tone="danger">{error}</Alert>}
         <Button type="submit" disabled={busy || !items.length || total <= 0}>
           {busy ? 'Recording sale…' : 'Record payment and issue receipt'}
         </Button>
       </form>
-    </Card>
+    </Card>}
     {sale && <OrderReceipt order={{ id: sale.order_id, payment_recorded: true }} initialReceipt={sale.receipt} onClose={() => setSale(null)} />}
   </div>
 }

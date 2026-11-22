@@ -23,6 +23,13 @@ PHARMACIST_ROLES = {"pharmacist"}
 MAX_QUANTITY = 2147483647
 
 
+class PharmacyOversightView(PharmacyView):
+    def get_roles(self):
+        if self.request.method in {"GET", "HEAD", "OPTIONS"}:
+            return self.roles | {"pharmacy"}
+        return self.roles
+
+
 def verify_return_witness(batch, actor, witness):
     if not batch.controlled:
         if witness:
@@ -47,7 +54,9 @@ class ReturnDisposition(StrictSerializer):
     witness = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(is_active=True), required=False)
 
 
-class ReturnView(PharmacyView):
+class ReturnView(PharmacyOversightView):
+    pharmacy_page = "safety"
+    pharmacy_actions = {'create': 'safety_manage', 'resolve': 'safety_manage'}
     roles = PHARMACIST_ROLES
     model, serializer_class = m.PharmacyReturn, ReturnedMedicineSerializer
 
@@ -110,7 +119,9 @@ class RecallAction(StrictSerializer):
     note = serializers.CharField(max_length=2000)
 
 
-class RecallContactView(PharmacyView):
+class RecallContactView(PharmacyOversightView):
+    pharmacy_page = "safety"
+    pharmacy_actions = {'follow_up': 'safety_manage'}
     roles = PHARMACIST_ROLES
     model, serializer_class = m.PharmacyRecallContact, RecallContactSerializer
     http_method_names = ["get", "post", "head", "options"]
@@ -176,7 +187,9 @@ class SafetyReportResolution(StrictSerializer):
     external_reference = serializers.CharField(max_length=200, required=False, allow_blank=True)
 
 
-class SafetyReportView(PharmacyView):
+class SafetyReportView(PharmacyOversightView):
+    pharmacy_page = "safety"
+    pharmacy_actions = {'create': 'safety_manage', 'resolve': 'safety_manage'}
     roles = PHARMACIST_ROLES
     model, serializer_class = m.PharmacySafetyReport, SafetyReportSerializer
 
@@ -244,18 +257,24 @@ class TransferAction(StrictSerializer):
     note = serializers.CharField(max_length=1900)
 
 
-class TransferView(PharmacyView):
+class TransferView(PharmacyOversightView):
+    pharmacy_page = "transfers"
+    pharmacy_actions = {'create': 'transfer_manage', 'transition': 'transfer_manage'}
     roles = PHARMACIST_ROLES
     model, serializer_class = m.PharmacyTransfer, TransferSerializer
 
     def get_queryset(self):
-        scope = organizations(self.request.user)
+        scope = self.organization_scope()
         rows = self.model.objects.filter(Q(organization__in=scope) | Q(destination__organization__in=scope))
         selected = self.request.query_params.get("organization")
         if selected:
             org = require_organization(self.request.user, selected)
             rows = rows.filter(Q(organization=org) | Q(destination__organization=org))
         return rows.select_related("source__medicine", "destination__organization").order_by("-pk")
+
+    def get_object(self):
+        from rest_framework.generics import get_object_or_404
+        return get_object_or_404(self.get_queryset(), pk=self.kwargs["pk"])
 
     @action(detail=True, methods=["post"])
     @transaction.atomic
@@ -264,7 +283,7 @@ class TransferView(PharmacyView):
         data = validated(TransferAction, request)
         step = data["action"]
         org_id = row.destination.organization_id if step in {"receive", "segregate"} else row.organization_id
-        require_organization(request.user, org_id, PHARMACIST_ROLES)
+        self.check_pharmacy_policy(require_organization(request.user, org_id, PHARMACIST_ROLES))
         target = {("requested", "dispatch"): "dispatched", ("requested", "cancel"): "cancelled",
                   ("dispatched", "receive"): "received", ("dispatched", "segregate"): "segregated"}.get((row.status, step))
         if not target:

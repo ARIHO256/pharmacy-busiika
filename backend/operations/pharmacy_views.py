@@ -81,6 +81,7 @@ class PurchaseTransition(StrictSerializer):
 
 
 class ReceiptInput(StrictSerializer):
+    packs = serializers.BooleanField(required=False, default=False)
     line = serializers.IntegerField(min_value=1)
     batch = serializers.IntegerField(min_value=1)
     quantity = serializers.IntegerField(min_value=1, max_value=2147483647)
@@ -90,6 +91,8 @@ class ReceiptInput(StrictSerializer):
 
 
 class ProcurementView(PharmacyView):
+    pharmacy_page = "procurement"
+    pharmacy_actions = {'create': 'purchase_edit', 'add_line': 'purchase_edit', 'remove_line': 'purchase_edit', 'receive': 'purchase_receive', 'transition': 'purchase_approve'}
     model = m.PharmacyPurchase
     serializer_class = PurchaseSerializer
 
@@ -160,7 +163,9 @@ class ProcurementView(PharmacyView):
             raise ValidationError("Select a batch for this order line, pharmacy and supplier.")
         values["reason"] = f"Purchase order #{purchase.pk}, line #{line.pk}. {values['reason']}"
         # Use the same lock order as inventory, dispensing and checkout.
-        Medicine.objects.select_for_update().get(pk=batch.medicine_id)
+        medicine = Medicine.objects.select_for_update().get(pk=batch.medicine_id)
+        if values.pop("packs"):
+            values["quantity"] = services.pack_units(medicine, values["quantity"])
         batch = m.MedicineBatch.objects.select_for_update().get(pk=batch.pk)
         previous = m.StockMovement.objects.filter(reference=values["reference"]).first()
         already_received = previous is not None
@@ -200,6 +205,8 @@ class CountReview(StrictSerializer):
 
 
 class StocktakeView(PharmacyView):
+    pharmacy_page = "stocktake"
+    pharmacy_actions = {'create': 'stock_count', 'review': 'stock_approve'}
     model = m.PharmacyStockCount
     serializer_class = StockCountSerializer
 
@@ -266,6 +273,8 @@ class FormularyUpdate(StrictSerializer):
 
 
 class FormularyView(PharmacyView):
+    pharmacy_page = "inventory"
+    pharmacy_actions = {'create': 'catalogue_edit', 'configure': 'catalogue_edit'}
     model = m.PharmacyFormularyEntry
     serializer_class = FormularySerializer
 

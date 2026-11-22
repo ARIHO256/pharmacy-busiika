@@ -49,7 +49,7 @@ function isItemActive(pathname, item) {
   return pathname === item.to || pathname.startsWith(`${item.to}/`)
 }
 
-export default function PortalLayout({ title, nav: items = [], role = 'patient', productLabel, home }) {
+export default function PortalLayout({ title, nav: items = [], role = 'patient', productLabel, home, workspaceName, outletContext }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -95,19 +95,19 @@ export default function PortalLayout({ title, nav: items = [], role = 'patient',
   const mobileNav = nav.filter((item) => item.group !== 'Settings').slice(0, 5)
 
   return (
-    <div className={`healthos-shell role-${effectiveRole}`}>
+    <div className={`healthos-shell role-${effectiveRole}${productLabel ? ' pharmacy-workspace' : ''}`}>
       <a className="healthos-skip-link" href="#main-content">Skip to main content</a>
 
       <aside className={`healthos-sidebar ${mobileOpen ? 'is-open' : ''}`} aria-label={`${experience.label} navigation`}>
         <div className="healthos-brand-row">
           <Link to={homePath} className="healthos-brand" aria-label={`${experience.title} home`}>
             <span className="healthos-brand-mark" aria-hidden="true">
-              <span className="healthos-brand-pulse" />
-              <HealthIcon name="heart" size={19} strokeWidth={2.2} />
+              {!productLabel && <span className="healthos-brand-pulse" />}
+              <HealthIcon name={productLabel ? 'pill' : 'heart'} size={19} strokeWidth={2.2} />
             </span>
             <span className="healthos-brand-copy">
               <strong>MyDoctor</strong>
-              <small>{productLabel || `HealthOS · ${experience.label}`}</small>
+              <small>{productLabel || (workspaceName ? 'Facility' : `HealthOS · ${experience.label}`)}</small>
             </span>
           </Link>
           <button type="button" className="healthos-icon-button sidebar-close" onClick={() => setMobileOpen(false)} aria-label="Close navigation">
@@ -115,18 +115,18 @@ export default function PortalLayout({ title, nav: items = [], role = 'patient',
           </button>
         </div>
 
-        <div className="healthos-role-card">
+        {!productLabel && <div className="healthos-role-card">
           <span className={`healthos-role-avatar tone-${experience.avatarTone}`}><HealthIcon name={roleIcon(effectiveRole)} size={20}/></span>
           <span>
             <small>{experience.eyebrow}</small>
-            <strong>{experience.title}</strong>
+            <strong>{workspaceName || experience.title}</strong>
           </span>
-        </div>
+        </div>}
 
         <nav className="healthos-sidebar-nav">
           {Object.entries(groupedNav).map(([group, items]) => (
             <section className="healthos-nav-group" key={group}>
-              <h2>{group}</h2>
+              {(!productLabel || items.length !== 1 || items[0].label !== group) && <h2>{group}</h2>}
               {items.map((item) => (
                 <NavLink
                   key={item.to}
@@ -140,7 +140,7 @@ export default function PortalLayout({ title, nav: items = [], role = 'patient',
                     <strong>{item.label}</strong>
                     {item.badge ? <small className="healthos-nav-badge">{item.badge}</small> : null}
                   </span>
-                  <HealthIcon name="chevron" size={14} className="healthos-nav-chevron" />
+                  {!productLabel && <HealthIcon name="chevron" size={14} className="healthos-nav-chevron" />}
                 </NavLink>
               ))}
             </section>
@@ -148,7 +148,7 @@ export default function PortalLayout({ title, nav: items = [], role = 'patient',
         </nav>
 
         <div className="healthos-sidebar-footer">
-          <div className="healthos-trust-line"><span /> Secure clinical workspace</div>
+          {!productLabel && <div className="healthos-trust-line"><span /> Secure clinical workspace</div>}
           <button type="button" className="healthos-signout" onClick={signOut}>
             <HealthIcon name="logout" size={17}/>
             Sign out
@@ -166,8 +166,10 @@ export default function PortalLayout({ title, nav: items = [], role = 'patient',
             </button>
             <Link to={homePath} className="healthos-mobile-brand"><span>M+</span> MyDoctor</Link>
             <div className="healthos-page-context">
-              <span>{experience.label} workspace</span>
-              <strong>{activeItem?.label || title}</strong>
+              {workspaceName ? <><span>Facility</span><strong>{workspaceName}</strong></> : productLabel ? <strong>{experience.label}</strong> : <>
+                <span>{experience.label} workspace</span>
+                <strong>{activeItem?.label || title}</strong>
+              </>}
             </div>
           </div>
 
@@ -177,8 +179,8 @@ export default function PortalLayout({ title, nav: items = [], role = 'patient',
               <span>Search workspace</span>
               <kbd>Ctrl K</kbd>
             </button>
-            <span className="healthos-system-status" title="Platform services operational"><i /> Connected</span>
-            {(!productLabel || nav.some((item) => item.to === experience.quickAction.to)) && <Link className="healthos-quick-action" to={experience.quickAction.to}>
+            {!productLabel && <span className="healthos-system-status" title="Platform services operational"><i /> Connected</span>}
+            {(!(productLabel || home) || nav.some((item) => item.to === experience.quickAction.to)) && <Link className="healthos-quick-action" to={experience.quickAction.to}>
               <HealthIcon name={experience.quickAction.icon} size={17}/>
               <span>{experience.quickAction.label}</span>
             </Link>}
@@ -212,16 +214,16 @@ export default function PortalLayout({ title, nav: items = [], role = 'patient',
         <main id="main-content" tabIndex={-1} className="healthos-main">
           <section className="healthos-page-heading">
             <div>
-              <span className="healthos-page-kicker">{experience.eyebrow}</span>
+              {!productLabel && <span className="healthos-page-kicker">{experience.eyebrow}</span>}
               <h1>{activeItem?.label || title}</h1>
-              <p>{activeItem?.description || experience.description}</p>
+              {!productLabel && <p>{activeItem?.description || experience.description}</p>}
             </div>
-            <div className="healthos-heading-tools">
+            {!productLabel && <div className="healthos-heading-tools">
               <span><HealthIcon name="shield" size={15}/> Role protected</span>
               <span><HealthIcon name="activity" size={15}/> Live data</span>
-            </div>
+            </div>}
           </section>
-          <Outlet />
+          <Outlet context={outletContext} />
         </main>
       </div>
 
@@ -229,7 +231,7 @@ export default function PortalLayout({ title, nav: items = [], role = 'patient',
         {mobileNav.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => isActive ? 'is-active' : ''}>
             <HealthIcon name={item.icon || 'file'} size={19}/>
-            <span>{item.label.split(' ')[0]}</span>
+            <span>{item.mobileLabel || item.label.split(' ')[0]}</span>
           </NavLink>
         ))}
         <button type="button" onClick={() => setMobileOpen(true)}><HealthIcon name="menu" size={19}/><span>More</span></button>

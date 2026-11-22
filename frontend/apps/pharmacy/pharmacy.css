@@ -1,0 +1,232 @@
+:root {
+  --health-text: #202a26;
+  --health-page: #f4f6f5;
+  --health-line: #dce3df;
+  --pharmacy-ink: #202a26;
+  --pharmacy-muted: #526159;
+  --pharmacy-green: #235e4c;
+  --pharmacy-highlight: #e5f0ea;
+}
+
+.pharmacy-workspace { background: var(--health-page); }
+.pharmacy-workspace .healthos-sidebar {
+  width: 228px;
+  color: var(--pharmacy-ink);
+  background: #fff;
+  border-right: 1px solid var(--health-line);
+  box-shadow: none;
+}
+.pharmacy-workspace .healthos-brand-row {
+  min-height: 64px;
+  padding: 0 16px;
+  border-color: var(--health-line);
+}
+.pharmacy-workspace .healthos-brand { color: var(--pharmacy-ink); gap: 10px; }
+.pharmacy-workspace .healthos-brand-mark,
+.pharmacy-wordmark > span {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 7px;
+  color: #fff;
+  background: var(--pharmacy-green);
+  box-shadow: none;
+}
+.pharmacy-workspace .healthos-brand-copy small {
+  color: var(--pharmacy-muted);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: .76rem;
+}
+.pharmacy-workspace .healthos-sidebar-nav { padding: 8px 10px; }
+.pharmacy-workspace .healthos-nav-group { margin: 12px 0; }
+.pharmacy-workspace .healthos-nav-group h2 {
+  padding-left: 10px;
+  color: var(--pharmacy-muted);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: .75rem;
+  font-weight: 600;
+}
+.pharmacy-workspace .healthos-nav-link {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 8px;
+  color: #34443b;
+  background: transparent;
+  transform: none;
+  box-shadow: none;
+}
+.pharmacy-workspace .healthos-nav-link:hover { background: #f2f5f3; }
+.pharmacy-workspace .healthos-nav-link.is-active { color: #1c503f; background: var(--pharmacy-highlight); }
+.pharmacy-workspace .healthos-nav-link.is-active::before { display: none; }
+.pharmacy-workspace .healthos-nav-icon,
+.pharmacy-workspace .healthos-nav-link.is-active .healthos-nav-icon {
+  color: inherit;
+  background: none;
+}
+.pharmacy-workspace .healthos-nav-copy strong { font-size: .83rem; font-weight: 550; }
+.pharmacy-workspace .healthos-nav-link.is-active strong { font-weight: 650; }
+.pharmacy-workspace .healthos-sidebar-footer { border-color: var(--health-line); }
+.pharmacy-workspace .healthos-signout { color: var(--pharmacy-muted); border-radius: 6px; }
+.pharmacy-workspace .healthos-signout:hover { background: #f3f5f4; }
+
+.pharmacy-workspace .healthos-workspace { margin-left: 228px; }
+.pharmacy-workspace .healthos-topbar {
+  min-height: 64px;
+  padding: 0 20px;
+  border-color: var(--health-line);
+  background: #fff;
+  backdrop-filter: none;
+}
+.pharmacy-workspace .healthos-search-trigger { background: #f5f7f6; color: var(--pharmacy-muted); }
+.pharmacy-workspace .healthos-search-trigger,
+.pharmacy-workspace .healthos-icon-button,
+.pharmacy-workspace .healthos-profile-menu,
+.pharmacy-workspace .healthos-quick-action { border-radius: 6px; }
+.pharmacy-workspace .healthos-quick-action,
+.pharmacy-workspace button.bg-gradient-to-r,
+.pharmacy-sign-in button.bg-gradient-to-r {
+  background: var(--pharmacy-green);
+  box-shadow: none;
+  border-radius: 6px;
+}
+.pharmacy-workspace .healthos-quick-action:hover { transform: none; }
+
+.pharmacy-workspace .healthos-main { max-width: 1440px; padding: 20px 24px 72px; }
+.pharmacy-workspace .healthos-page-heading { margin-bottom: 16px; padding: 0; }
+.pharmacy-workspace .healthos-page-heading h1 {
+  margin: 0;
+  color: var(--pharmacy-ink);
+  font-size: clamp(1.35rem, 2vw, 1.6rem);
+  letter-spacing: -.025em;
+}
+.pharmacy-workspace .healthos-main :is(section, article).bg-white {
+  border-color: var(--health-line);
+  border-radius: 8px;
+  box-shadow: none;
+}
+.pharmacy-workspace .healthos-main :is(input, select, textarea),
+.pharmacy-workspace dialog :is(input, select, textarea),
+.pharmacy-sign-in input {
+  border-radius: 6px;
+  box-shadow: none;
+}
+.pharmacy-workspace .healthos-main button:not([aria-label]),
+.pharmacy-workspace dialog button { border-radius: 6px; }
+.pharmacy-workspace dialog { border-radius: 10px; }
+.pharmacy-workspace .healthos-main th {
+  font-size: .77rem;
+  font-weight: 650;
+  color: var(--pharmacy-muted);
+  letter-spacing: normal;
+  text-transform: none;
+}
+.pharmacy-workspace .healthos-main :is(th, td) {
+  padding-top: 9px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #edf0ee;
+}
+.pharmacy-workspace .healthos-main tbody tr:last-child td { border-bottom: 0; }
+.pharmacy-workspace .healthos-main tbody tr:hover { background: #f7f9f8; }
+
+.pharmacy-sign-in {
+  display: grid;
+  min-height: 100svh;
+  place-items: center;
+  padding: 24px;
+  background: var(--health-page);
+}
+.pharmacy-sign-in-content { width: min(100%, 400px); }
+.pharmacy-wordmark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  color: var(--pharmacy-ink);
+  font-size: .95rem;
+}
+.pharmacy-sign-in-panel {
+  padding: clamp(18px, 5vw, 28px);
+  border: 1px solid var(--health-line);
+  border-radius: 10px;
+  background: #fff;
+}
+.pharmacy-sign-in-panel h1 { margin: 0 0 20px; font-size: 1.55rem; font-weight: 650; letter-spacing: -.02em; }
+.pharmacy-sign-in-register { margin-top: 20px; font-size: .875rem; }
+.pharmacy-sign-in-register a { color: var(--pharmacy-green); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+
+@media (max-width: 980px) {
+  .pharmacy-workspace .healthos-sidebar.is-open { box-shadow: 0 0 24px #17291e28; }
+  .pharmacy-workspace .healthos-workspace { margin-left: 0; }
+  .pharmacy-workspace .healthos-sidebar .sidebar-close { color: var(--pharmacy-muted); }
+}
+@media (max-width: 720px) {
+  .pharmacy-workspace .healthos-topbar { padding: 0 10px; }
+  .pharmacy-workspace .healthos-main { padding: 16px 12px 84px; }
+  .pharmacy-workspace .healthos-mobile-bottom-nav { background: #fff; box-shadow: none; backdrop-filter: none; }
+  .pharmacy-workspace .healthos-mobile-bottom-nav a.is-active { background: var(--pharmacy-highlight); color: var(--pharmacy-green); }
+}
+
+.healthos-auth-shell.register-mode {
+  min-height: 100svh;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  background: var(--health-page);
+}
+.register-mode .healthos-auth-story {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-height: 0;
+  width: min(100%, 720px);
+  margin: 0 auto;
+  padding: 28px 24px 0;
+  color: var(--pharmacy-ink);
+  background: none;
+}
+.register-mode .healthos-auth-story::after,
+.register-mode .healthos-auth-trust,
+.register-mode .healthos-auth-kicker,
+.register-mode .healthos-selected-role {
+  display: none;
+}
+.register-mode .healthos-auth-brand { color: var(--pharmacy-ink); }
+.register-mode .healthos-auth-brand > span {
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  background: var(--pharmacy-green);
+  box-shadow: none;
+}
+.register-mode .healthos-auth-brand small { color: var(--pharmacy-muted); }
+.register-mode .healthos-auth-copy { padding: 16px 0; max-width: none; }
+.register-mode .healthos-auth-copy h1 { font-size: 1.5rem; line-height: 1.3; letter-spacing: -.02em; color: var(--pharmacy-ink); }
+.register-mode .healthos-auth-copy h1 em { display: none; }
+.register-mode .healthos-auth-copy p { color: var(--pharmacy-muted); font-size: .875rem; }
+.register-mode .healthos-auth-form-area { width: 100%; padding: 0 24px 32px; background: transparent; }
+.register-mode .healthos-auth-form-card {
+  width: min(100%, 672px);
+  border-color: var(--health-line);
+  border-radius: 10px;
+  box-shadow: none;
+}
+.register-mode .healthos-auth-form-head small,
+.register-mode .healthos-auth-form-icon { display: none; }
+.register-mode button.bg-gradient-to-r {
+  background: var(--pharmacy-green);
+  box-shadow: none;
+  border-radius: 6px;
+}
+.pharmacy-workspace .support-trigger,
+.pharmacy-workspace .healthos-mobile-brand span {
+  border-radius: 7px;
+  background: var(--pharmacy-green);
+  box-shadow: none;
+}
+
+@media (max-width: 430px) {
+  .pharmacy-workspace .healthos-quick-action { display: none; }
+}

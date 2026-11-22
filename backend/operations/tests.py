@@ -163,6 +163,26 @@ class OperationsTests(APITestCase):
         self.assertIsNotNone(result.escalated_at)
         self.assertTrue(Notification.objects.filter(user=self.doctor, kind="laboratory").exists())
 
+    def test_clinic_uses_facility_summary_and_cannot_open_inpatient_workflows(self):
+        clinic_owner = User.objects.create_user(email="clinic-mode@operations.test", role="hospital", is_verified=True)
+        clinic = Organization.objects.create(owner=clinic_owner, legal_name="Clinic mode", organization_type="clinic", status="verified")
+        self.client.force_authenticate(clinic_owner)
+        summary = self.client.get("/api/workforce/summary/")
+        self.assertEqual(summary.status_code, 200, summary.data)
+        self.assertEqual(summary.data["organization"]["type"], "clinic")
+        response = self.client.get(f"{BASE}admissions/?organization={clinic.pk}")
+        self.assertEqual(response.status_code, 403, response.data)
+        body = {"organization": clinic.pk, "patient": self.patient.pk, "attending_doctor": self.doctor.pk, "reason": "Test"}
+        response = self.client.post(f"{BASE}admissions/", body, format="json")
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertEqual(self.client.post("/api/services/beds/", {"ward": "Test", "label": "1"}).status_code, 403)
+        self.assertEqual(self.client.get("/api/services/hospital-services/").status_code, 200)
+        self.client.force_authenticate(self.owner)
+        summary = self.client.get("/api/workforce/summary/")
+        self.assertEqual(summary.status_code, 200, summary.data)
+        self.assertEqual(summary.data["organization"]["type"], "hospital")
+        self.assertEqual(self.client.get(f"{BASE}admissions/?organization={self.hospital.pk}").status_code, 200)
+
     def test_admission_transfer_discharge_and_bed_protection(self):
         admission = self.admission()
         self.bed.refresh_from_db()
@@ -255,6 +275,80 @@ class OperationsTests(APITestCase):
         self.post(path + "receive/", {**receipt, "reference": str(uuid.uuid4())}, self.pharmacist, 400)
         self.medicine.refresh_from_db()
         self.assertEqual(self.medicine.stock, 3)
+
+    def test_pharmacy_purchase_to_buyer_receipt_shift_close_and_stock_valuation(self):
+        supplier = Supplier.objects.create(
+            pharmacy=self.pharmacy_owner, suppliername="Test supplier",
+            qualification_reference="QUAL-1", qualified_until=timezone.localdate() + timedelta(days=30),
+        )
+        batch = self.post("medicine-batches/", {
+            "organization": self.pharmacy.pk, "medicine": self.medicine.pk, "supplier": supplier.pk,
+            "batch_number": "JOURNEY-1", "expires_on": str(timezone.localdate() + timedelta(days=30)),
+        }, self.pharmacist)
+        purchase = self.post("pharmacy-purchases/", {
+            "organization": self.pharmacy.pk, "supplier": supplier.pk,
+        }, self.pharmacist)
+        path = f"pharmacy-purchases/{purchase['id']}/"
+        line = self.post(path + "add-line/", {
+            "medicine": self.medicine.pk, "ordered": 10, "unit_cost": 60,
+        }, self.pharmacist)
+        self.post(path + "transition/", {"action": "approve", "reason": "Order approved"}, self.pharmacy_owner, 200)
+        self.post(path + "receive/", {
+            "line": line["id"], "batch": batch["id"], "quantity": 10,
+            "reference": str(uuid.uuid4()), "reason": "Delivery note",
+        }, self.pharmacist, 200)
+
+        services = "/api/services/"
+        self.client.force_authenticate(self.patient)
+        catalogue = self.client.get(services + "medicines/", {"shop": 1})
+        self.assertEqual([row["id"] for row in catalogue.data], [self.medicine.pk])
+        self.assertEqual(self.client.post(services + "cart/", {"medicine_id": self.medicine.pk, "qty": 11}).status_code, 409)
+        self.assertEqual(self.client.post(services + "cart/", {"medicine_id": self.medicine.pk, "qty": 3}).status_code, 201)
+        order = self.client.post(services + "orders/checkout/", {"delivery": False})
+        self.assertEqual(order.status_code, 201, order.data)
+        order_id = order.data[0]["id"]
+        receipt_url = services + f"orders/{order_id}/receipt/"
+        self.assertEqual(self.client.get(receipt_url).status_code, 404)
+
+        cashier = User.objects.create_user(email="journey-cashier@operations.test", role="cashier")
+        StaffMembership.objects.create(user=cashier, organization=self.pharmacy, role="cashier")
+        self.client.force_authenticate(cashier)
+        shifts = services + "pharmacy/shifts/"
+        shift = self.client.post(shifts, {"opening_float": 500})
+        self.assertEqual(shift.status_code, 201, shift.data)
+        receipt = self.client.post(receipt_url, {"amount": 300, "method": "cash"})
+        self.assertEqual(receipt.status_code, 201, receipt.data)
+        close = self.client.post(f"{shifts}{shift.data['id']}/close/", {"closing_cash": 800})
+        self.assertEqual(close.status_code, 200, close.data)
+        self.assertEqual(close.data["variance"], 0)
+
+        self.client.force_authenticate(self.pharmacist)
+        for status in ("confirmed", "ready", "delivered"):
+            result = self.client.post(services + f"orders/{order_id}/update/", {
+                "status": status, "handover_reference": "Pickup verified",
+            })
+            self.assertEqual(result.status_code, 200, result.data)
+        self.client.force_authenticate(self.patient)
+        self.assertEqual(self.client.get(receipt_url).data["number"], receipt.data["number"])
+
+        count = self.post("pharmacy-stocktakes/", {
+            "organization": self.pharmacy.pk, "batch": batch["id"], "counted": 7, "reason": "Count after pickup",
+        }, self.pharmacist)
+        self.post(f"pharmacy-stocktakes/{count['id']}/review/", {
+            "action": "approve", "reason": "Count matches the shelf",
+        }, self.witness, 200)
+        self.assertEqual(m.MedicineBatch.objects.get(pk=batch["id"]).quantity, 7)
+        report_url = services + "pharmacy/reports/"
+        self.assertEqual(self.client.get(report_url).status_code, 403)
+        self.client.force_authenticate(self.pharmacy_owner)
+        report = self.client.get(report_url)
+        self.assertEqual(report.status_code, 200, report.data)
+        self.assertEqual(report.data["sales"]["revenue"], 300)
+        self.assertEqual(report.data["margin"]["estimated_gross_margin"], "120.00")
+        self.assertEqual(report.data["stock"]["estimated_value"], "420.00")
+        for resource in ("pharmacy-returns", "pharmacy-recalls", "pharmacy-safety-reports", "pharmacy-transfers"):
+            self.assertEqual(self.client.get(BASE + resource + "/").status_code, 200)
+        self.assertEqual(self.client.post(BASE + "pharmacy-returns/", {}).status_code, 403)
 
     def test_stocktake_requires_independent_review_and_rejects_stale_count(self):
         batch = self.batch()

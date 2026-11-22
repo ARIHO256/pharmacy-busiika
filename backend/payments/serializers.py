@@ -96,6 +96,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "organization_name",
             "appointment",
             "appointment_info",
+            "visit",
             "issued_by",
             "issued_by_name",
             "amount",
@@ -148,6 +149,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
 
 class CashierInvoiceCreateSerializer(serializers.Serializer):
+    visit = serializers.IntegerField(min_value=1, required=False)
     patient = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(role=User.Role.PATIENT))
     appointment = serializers.PrimaryKeyRelatedField(
         queryset=Appointment.objects.all(),

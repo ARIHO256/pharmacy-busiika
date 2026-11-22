@@ -1,3 +1,4 @@
+import { usePharmacyPermissions } from './PharmacyPermissions'
 import { useState } from 'react'
 import { useAuth } from '../../auth/AuthContext'
 import client from '../../api/client'
@@ -9,6 +10,7 @@ const emptyForm = { qualification_reference: '', qualified_until: '', supplierna
 const emptyProduct = { name: '', qty: '', price: '' }
 
 export default function Suppliers() {
+  const allows = usePharmacyPermissions()
   const { user } = useAuth()
   const canQualify = user?.role !== 'storekeeper'
   const { data: suppliers, loading, error, reload } = useApi(() => servicesApi.suppliers())
@@ -84,7 +86,7 @@ export default function Suppliers() {
 
   return (
     <LoadingOrError loading={loading} error={error}>
-      <Card title="Suppliers" actions={<Button onClick={openAdd}>+ Add supplier</Button>}>
+      <Card title="Suppliers" actions={allows('supplier_edit') && <Button onClick={openAdd}>+ Add supplier</Button>}>
         <Table
           empty="No suppliers yet"
           columns={[
@@ -121,7 +123,7 @@ export default function Suppliers() {
             {
               key: 'actions',
               label: '',
-              render: (s) => (
+              render: (s) => allows('supplier_edit') && (
                 <div className="flex gap-2 justify-end">
                   <Button variant="outline" onClick={() => openEdit(s)}>
                     Edit

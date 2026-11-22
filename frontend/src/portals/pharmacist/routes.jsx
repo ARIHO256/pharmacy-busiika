@@ -1,3 +1,4 @@
+import StockSetup from '../pharmacy/StockSetup'
 import Counter from '../pharmacy/Counter'
 import ShiftClosing from '../pharmacy/ShiftClosing'
 import { PharmacySafety, PharmacyTransfers } from '../pharmacy/SafetyWorkflows'
@@ -10,6 +11,7 @@ import Inventory from '../pharmacy/Inventory'
 import Orders from '../pharmacy/Orders'
 import Suppliers from '../pharmacy/Suppliers'
 export const nav=[
+  { to: '/pharmacist/stock-setup', permissionKey: 'stock-control', label: 'Stock Setup & Alerts', icon: 'clipboard', group: 'Inventory' },
   { to: '/pharmacist/counter', label: 'New Sale', icon: 'cart', group: 'Sales', roles: ['pharmacy', 'pharmacist', 'cashier'] },
   { to: '/pharmacist/shifts', label: 'Cash Shifts', icon: 'money', group: 'Sales', roles: ['pharmacy', 'pharmacist', 'cashier'] },
   { to: '/pharmacist/transfers', label: 'Branch Transfers', roles: ['pharmacist'], icon: 'truck', group: 'Inventory' },
@@ -20,6 +22,7 @@ export const nav=[
   { to: '/pharmacist/medicine-register', label: 'Uganda Medicine Register', icon: 'pill', group: 'Inventory', description: 'Search National Drug Authority reference records' },
 ]
 export const routes=[
+  { path: 'stock-setup', element: <StockSetup /> },
   { path: 'counter', element: <Counter /> },
   { path: 'shifts', element: <ShiftClosing /> },
   { path: 'transfers', element: <PharmacyTransfers /> },

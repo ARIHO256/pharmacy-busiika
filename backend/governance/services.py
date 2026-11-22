@@ -33,6 +33,19 @@ def audit(
     if resource is not None:
         resource_type = resource.__class__.__name__
         resource_id = str(getattr(resource, "pk", ""))
+    metadata = dict(metadata or {})
+    if actor and (action.startswith("pharmacy.") or "pharmacy_id" in metadata):
+        metadata["worker"] = {"name": actor.get_full_name().strip() or actor.display_name,
+                              "email": actor.email, "role": actor.role}
+        if metadata.get("pharmacy_id") and actor.role != "pharmacy":
+            from workforce.models import StaffMembership
+
+            custom = StaffMembership.objects.filter(
+                user=actor, status="active", organization__owner_id=metadata["pharmacy_id"],
+                organization__organization_type="pharmacy", custom_role__isnull=False,
+            ).order_by("-is_primary", "pk").values_list("custom_role__name", flat=True).first()
+            if custom:
+                metadata["worker"]["custom_role"] = custom
     meta = _request_meta(request)
     return AuditEvent.objects.create(
         actor=actor,
@@ -42,7 +55,7 @@ def audit(
         resource_id=resource_id,
         purpose=purpose,
         decision=decision,
-        metadata=metadata or {},
+        metadata=metadata,
         emergency_access=emergency_access,
         **meta,
     )

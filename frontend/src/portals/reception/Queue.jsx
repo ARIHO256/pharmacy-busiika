@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useState } from 'react'
 import { useAuth } from '../../auth/AuthContext'
 import { workforceApi } from '../../api/endpoints'
@@ -59,6 +60,10 @@ export default function Queue() {
         { key: 'reason', label: 'Reason' },
         { key: 'priority', label: 'Priority', render: (v) => statusBadge(v.priority) },
         { key: 'status', label: 'Stage', render: (v) => statusBadge(v.status) },
+        { key: 'journey', label: 'Journey', render: (v) => <div>
+          {v.admission && <div>{v.admission.status === 'admitted' ? 'Admitted' : 'Discharged'}{v.admission.bed ? ` · ${v.admission.bed}` : ''}</div>}
+          <Link className="text-primary-700 underline" to={`../handoffs?visit=${v.id}`}>Handoffs</Link>
+        </div> },
         { key: 'checked_in_at', label: 'Checked in', render: (v) => displayDate(v.checked_in_at) },
         { key: 'team', label: 'Care team', render: (v) => <div className="space-y-1">
           <div>Doctor: {v.assigned_doctor_name || 'Unassigned'}</div>

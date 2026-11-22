@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
+import { usePharmacyPermissions } from '../portals/pharmacy/PharmacyPermissions'
 import { operationsApi } from '../api/endpoints'
 import { Alert, Button, Card, Input, Modal, Select, Spinner, Table, Textarea } from './ui'
 import { getError, statusBadge } from '../portals/staff/shared'
 
 export const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, required: true, ...extra })
 
-export default function OperationalWorkspace({ title, sections, organizationType }) {
+export default function OperationalWorkspace({ title, sections, organizationType, readOnly = false }) {
+  const allows = usePharmacyPermissions()
   const [selected, setSelected] = useState(sections[0].resource)
   const [context, setContext] = useState(null)
   const [organization, setOrganization] = useState('')
@@ -115,7 +117,7 @@ export default function OperationalWorkspace({ title, sections, organizationType
     { key: 'id', label: 'Reference', render: (row) => `#${row.id}` },
     ...section.columns,
     { key: 'actions', label: 'Actions', render: (row) => <div className="flex flex-wrap gap-2">
-      {(section.actions?.(row, context) || []).map((definition) => <Button key={definition.label} variant="outline" onClick={() => act(definition, row)}>{definition.label}</Button>)}
+      {!readOnly && (section.actions?.(row, context) || []).filter((definition) => allows(definition.permission || section.actionPermission)).map((definition) => <Button key={definition.label} variant="outline" onClick={() => act(definition, row)}>{definition.label}</Button>)}
     </div> },
   ]
 
@@ -128,7 +130,7 @@ export default function OperationalWorkspace({ title, sections, organizationType
       {!context.organizations.length && <option value="">No verified organization membership</option>}
       {context.organizations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
     </Select>}
-    <Card title={section.label} actions={<div className="flex gap-2"><Button variant="outline" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>Refresh</Button>{section.create && <Button disabled={!context || (section.organization && !organization)} onClick={() => open({ ...section.create, create: true })}>{section.create.label || 'Add record'}</Button>}</div>}>
+    <Card title={section.label} actions={<div className="flex gap-2"><Button variant="outline" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>Refresh</Button>{!readOnly && section.create && allows(section.create.permission || section.actionPermission) && <Button disabled={!context || (section.organization && !organization)} onClick={() => open({ ...section.create, create: true })}>{section.create.label || 'Add record'}</Button>}</div>}>
       {loading ? <Spinner /> : <Table rows={rows} columns={columns} empty="No records yet" />}
       <div className="flex justify-end gap-2 mt-4"><Button variant="outline" disabled={loading || page === 1} onClick={() => setPage((value) => value - 1)}>Previous</Button><Button variant="outline" disabled={loading || !hasNext} onClick={() => setPage((value) => value + 1)}>Next</Button></div>
     </Card>

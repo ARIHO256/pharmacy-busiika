@@ -31,6 +31,7 @@ from .models import (
     PatientVisit,
     StaffInvitation,
     StaffMembership,
+    PharmacyCustomRole,
     TriageRecord,
 )
 from .serializers import (
@@ -97,14 +98,14 @@ class StaffListInviteView(APIView):
         organization = _organization_or_error(request)
         if not organization:
             return Response({"detail": "No organization is in scope."}, status=400)
-        memberships = organization.staff_memberships.select_related("user", "department")
+        memberships = organization.staff_memberships.select_related("user", "department", "custom_role")
         role = request.query_params.get("role")
         status_value = request.query_params.get("status")
         if role:
             memberships = memberships.filter(role=role)
         if status_value:
             memberships = memberships.filter(status=status_value)
-        invitations = organization.staff_invitations.filter(status="pending").select_related("department")
+        invitations = organization.staff_invitations.filter(status="pending").select_related("department", "custom_role")
         return Response(
             {
                 "staff": StaffMembershipSerializer(memberships, many=True).data,
@@ -120,6 +121,13 @@ class StaffListInviteView(APIView):
         serializer = StaffInvitationSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        custom = data.get("custom_role")
+        if custom and (
+            organization.organization_type != "pharmacy" or organization.status != "verified"
+            or request.user.role != "pharmacy" or organization.owner_id != request.user.pk
+            or custom.pharmacy_id != request.user.pk or custom.base_role != data["role"]
+        ):
+            return Response({"detail": "Select a custom role from this pharmacy with the matching staff type."}, status=400)
         department = data.get("department")
         if department and department.organization_id != organization.id:
             return Response({"detail": "Department belongs to another organization."}, status=400)
@@ -136,8 +144,12 @@ class StaffListInviteView(APIView):
             job_title=data.get("job_title", ""),
             employee_number=data.get("employee_number", ""),
             department=department,
+            custom_role=custom,
         )
-        audit_workforce(request, "workforce.invitation.created", invitation, metadata={"role": invitation.role})
+        metadata = {"role": invitation.role}
+        if organization.organization_type == "pharmacy":
+            metadata["pharmacy_id"] = organization.owner_id
+        audit_workforce(request, "workforce.invitation.created", invitation, metadata=metadata)
         emit_workforce_event(
             "workforce.staff.invited",
             invitation,
@@ -232,6 +244,7 @@ class InvitationDetailAcceptView(APIView):
             organization=invitation.organization,
             department=invitation.department,
             role=invitation.role,
+            custom_role=invitation.custom_role,
             job_title=invitation.job_title,
             employee_number=invitation.employee_number,
             status=StaffMembership.Status.ACTIVE,
@@ -290,7 +303,31 @@ class StaffMembershipStatusView(APIView):
         # Membership suspension is organization-scoped. Global account suspension
         # is reserved for the platform administrator so work at another facility
         # is not accidentally disabled.
-        audit_workforce(request, f"workforce.membership.{status_value}", membership)
+        metadata = {"pharmacy_id": membership.organization.owner_id} if membership.organization.organization_type == "pharmacy" else None
+        audit_workforce(request, f"workforce.membership.{status_value}", membership, metadata=metadata)
+        return Response(StaffMembershipSerializer(membership).data)
+
+
+class PharmacyStaffRoleView(APIView):
+    permission_classes = [IsRole]
+    allowed_roles = {"pharmacy"}
+
+    @transaction.atomic
+    def patch(self, request, pk):
+        from rest_framework import serializers
+
+        field = serializers.IntegerField(min_value=1, allow_null=True)
+        role_id = field.run_validation(request.data.get("custom_role", serializers.empty))
+        membership = get_object_or_404(
+            StaffMembership.objects.select_for_update(),
+            pk=pk, organization__owner=request.user, organization__organization_type="pharmacy",
+            organization__status="verified", organization__active=True,
+        )
+        membership.custom_role = get_object_or_404(
+            PharmacyCustomRole, pk=role_id, pharmacy=request.user, base_role=membership.role,
+        ) if role_id else None
+        membership.save(update_fields=["custom_role", "updated_at"])
+        audit_workforce(request, "pharmacy.staff_role.assigned", membership, metadata={"custom_role": role_id})
         return Response(StaffMembershipSerializer(membership).data)
 
 
@@ -360,7 +397,7 @@ class VisitListCreateView(APIView):
         from django.db.models import Prefetch
         from services.models import LabOrder
 
-        qs = qs.prefetch_related(Prefetch("lab_orders", queryset=LabOrder.objects.select_related("lab")))
+        qs = qs.prefetch_related(Prefetch("lab_orders", queryset=LabOrder.objects.select_related("lab")), "admissions__bed")
         status_value = request.query_params.get("status")
         date_value = request.query_params.get("date")
         if status_value:
@@ -536,9 +573,29 @@ class VisitActionView(APIView):
                 if not any(user.role == role and str(user.pk) == str(selection) for user in eligible):
                     return Response({"detail": f"Select a verified {role} at this facility."}, status=400)
             setattr(visit, f"{field}_id", selection or None)
+        if not assignment_only and request.user.role == "doctor" and visit.assigned_doctor_id != request.user.pk:
+            return Response({"detail": "Only the assigned doctor can change this visit."}, status=403)
+        checkout_note = request.data.get("checkout_note", "")
+        if not isinstance(checkout_note, str) or len(checkout_note) > 1000:
+            return Response({"detail": "Checkout notes must be at most 1,000 characters."}, status=400)
+        if not assignment_only and status_value in {PatientVisit.Status.COMPLETED, PatientVisit.Status.CANCELLED}:
+            if visit.admissions.filter(status="admitted").exists():
+                return Response({"detail": "The linked admission must be discharged first."}, status=409)
+            if status_value == PatientVisit.Status.COMPLETED and any(
+                invoice.balance for invoice in visit.invoices.exclude(status="void")
+            ):
+                return Response({"detail": "An invoice for this visit still has an outstanding balance."}, status=409)
+            unresolved = visit.handoffs.exclude(status__in=["completed", "cancelled"])
+            if status_value == PatientVisit.Status.COMPLETED and checkout_note.strip() and request.user.role == "doctor":
+                # A receiving facility can report back after the originating consultation closes.
+                unresolved = unresolved.filter(referral_route__isnull=True)
+            if unresolved.exists():
+                return Response({"detail": "Resolve all outstanding handoffs before closing this visit."}, status=409)
         visit.status = status_value
         if status_value == PatientVisit.Status.COMPLETED:
-            visit.checked_out_at = timezone.now()
+            visit.checked_out_at = visit.checked_out_at or timezone.now()
+            if checkout_note.strip() and request.user.role == "doctor":
+                visit.checkout_note = checkout_note.strip()
         visit.save()
         audit_workforce(request, "visit.care_team_assigned" if assignment_only else f"visit.{status_value}", visit, patient=visit.patient)
         return Response(PatientVisitSerializer(visit).data)
@@ -658,7 +715,13 @@ class OperationsSummaryView(APIView):
         visits = PatientVisit.objects.filter(organization=organization, checked_in_at__date=today)
         return Response(
             {
-                "organization": {"id": organization.id, "name": organization.legal_name},
+                "organization": {
+                    "id": organization.id, "name": organization.legal_name,
+                    "type": organization.organization_type, "status": organization.status,
+                    "has_pharmacy": organization.embedded_pharmacies.filter(
+                        active=True, status="verified", owner__role="pharmacy",
+                    ).exists(),
+                },
                 "today_visits": visits.count(),
                 "waiting_triage": visits.filter(status=PatientVisit.Status.WAITING_TRIAGE).count(),
                 "waiting_clinician": visits.filter(status=PatientVisit.Status.WAITING_CLINICIAN).count(),

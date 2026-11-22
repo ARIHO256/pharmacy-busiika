@@ -3,6 +3,11 @@ from django.urls import path
 from . import pharmacy_prescription_views as rx, views
 from .pharmacy_sales import PharmacyCounterSaleView, PharmacySaleReceiptView, PharmacyShiftCloseView, PharmacyShiftView
 
+from .pharmacy_finance import PharmacyCreditPaymentView, PharmacyCreditView, PharmacyRefundView
+from .pharmacy_support import BuyerAddressView, PharmacyIssueView, PrescriberIssueView
+from .pharmacy_workbench import PharmacyAuditView, PharmacyStockAlertsView, PharmacyStockSetupView
+from .pharmacy_reports import PharmacyReportsView
+from .pharmacy_permissions import PharmacyRolePolicyView, bound_view
 from .taxonomy_views import TaxonomyManagementView, TaxonomyNodeManagementView
 
 urlpatterns = [
@@ -13,28 +18,43 @@ urlpatterns = [
     path("insurers/", views.InsurerListView.as_view()),
 
     # Pharmacy
+    path("pharmacy/refunds/", PharmacyRefundView.as_view()),
+    path("pharmacy/credit/", PharmacyCreditView.as_view()),
+    path("pharmacy/credit/<int:pk>/payments/", PharmacyCreditPaymentView.as_view()),
+    path("pharmacy/buyer-address/", BuyerAddressView.as_view()),
+    path("pharmacy/prescriber-issues/", PrescriberIssueView.as_view()),
+    path("pharmacy/prescriber-issues/<int:pk>/", PrescriberIssueView.as_view()),
+    path("pharmacy/issues/<str:kind>/<int:pk>/", PharmacyIssueView.as_view()),
+    path("pharmacy/issues/<str:kind>/<int:pk>/<int:issue>/", PharmacyIssueView.as_view()),
+    path("pharmacy/stock-setup/", PharmacyStockSetupView.as_view()),
+    path("pharmacy/stock-alerts/", PharmacyStockAlertsView.as_view()),
+    path("pharmacy/audit/", PharmacyAuditView.as_view()),
+    path("pharmacy/reports/", PharmacyReportsView.as_view()),
+    path("pharmacy/role-permissions/", PharmacyRolePolicyView.as_view()),
     path("medicine-taxonomy/manage/", TaxonomyManagementView.as_view()),
     path("medicine-taxonomy/manage/<slug:node_id>/", TaxonomyNodeManagementView.as_view()),
-    path("medicine-taxonomy/", views.MedicineTaxonomyView.as_view()),
-    path("medicines/", views.MedicineListCreateView.as_view()),
-    path("medicines/<int:pk>/", views.MedicineDetailView.as_view()),
+    path("medicine-taxonomy/", bound_view(views.MedicineTaxonomyView, "inventory")),
+    path("medicines/", bound_view(views.MedicineListCreateView, "inventory", write="catalogue_edit")),
+    path("medicines/<int:pk>/", bound_view(views.MedicineDetailView, "inventory", write="catalogue_edit")),
+    path("pharmacy/wholesale/cart/", views.CartListCreateView.as_view(wholesale_only=True)),
+    path("pharmacy/wholesale/checkout/", views.CheckoutView.as_view(wholesale_only=True)),
     path("cart/", views.CartListCreateView.as_view()),
     path("cart/<int:pk>/", views.CartDetailView.as_view()),
     path("orders/checkout/", views.CheckoutView.as_view()),
-    path("orders/", views.OrderListView.as_view()),
-    path("pharmacy/counter-sales/", PharmacyCounterSaleView.as_view()),
-    path("pharmacy/shifts/", PharmacyShiftView.as_view()),
-    path("pharmacy/shifts/<int:pk>/close/", PharmacyShiftCloseView.as_view()),
-    path("orders/<int:pk>/receipt/", PharmacySaleReceiptView.as_view()),
-    path("orders/<int:pk>/update/", views.OrderUpdateView.as_view()),
-    path("pharmacy-orders/", views.PharmacyOrderListView.as_view()),
-    path("pharmacy-orders/<int:pk>/update/", views.PharmacyOrderUpdateView.as_view()),
-    path("pharmacy-orders/<int:pk>/review/", rx.PharmacyPrescriptionReviewView.as_view()),
-    path("pharmacy-orders/<int:pk>/substitutions/", rx.PharmacySubstitutionRequestView.as_view()),
+    path("orders/", bound_view(views.OrderListView, "orders")),
+    path("pharmacy/counter-sales/", bound_view(PharmacyCounterSaleView, "counter", write="sell")),
+    path("pharmacy/shifts/", bound_view(PharmacyShiftView, "shifts", write="shift_manage")),
+    path("pharmacy/shifts/<int:pk>/close/", bound_view(PharmacyShiftCloseView, "shifts", write="shift_manage")),
+    path("orders/<int:pk>/receipt/", bound_view(PharmacySaleReceiptView, "orders", write="payment", read="receipt_print")),
+    path("orders/<int:pk>/update/", bound_view(views.OrderUpdateView, "orders", write="fulfil")),
+    path("pharmacy-orders/", bound_view(views.PharmacyOrderListView, "rx-orders")),
+    path("pharmacy-orders/<int:pk>/update/", bound_view(views.PharmacyOrderUpdateView, "rx-orders", write="rx_manage")),
+    path("pharmacy-orders/<int:pk>/review/", bound_view(rx.PharmacyPrescriptionReviewView, "rx-orders", write="rx_manage")),
+    path("pharmacy-orders/<int:pk>/substitutions/", bound_view(rx.PharmacySubstitutionRequestView, "rx-orders", write="rx_manage")),
     path("pharmacy-substitutions/", rx.PrescriberSubstitutionView.as_view()),
     path("pharmacy-substitutions/<int:pk>/", rx.PrescriberSubstitutionView.as_view()),
-    path("suppliers/", views.SupplierListCreateView.as_view()),
-    path("suppliers/<int:pk>/", views.SupplierDetailView.as_view()),
+    path("suppliers/", bound_view(views.SupplierListCreateView, "suppliers", write="supplier_edit")),
+    path("suppliers/<int:pk>/", bound_view(views.SupplierDetailView, "suppliers", write="supplier_edit")),
 
     # Lab
     path("lab-tests/", views.LabTestListCreateView.as_view()),

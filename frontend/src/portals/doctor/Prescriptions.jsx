@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { appointmentApi, prescriptionApi } from '../../api/endpoints'
+import { appointmentApi, prescriptionApi, workforceApi } from '../../api/endpoints'
 import { Badge, Button, Card, Input, Modal, Select, Spinner, Table } from '../../components/ui'
 
 const emptyItem = { medicine_name: '', dosage: '', frequency: '', duration: '', quantity: 1 }
@@ -10,7 +10,7 @@ const apptLabel = (a) =>
     a.patient_name || [a.patient_first_name, a.patient_last_name].filter(Boolean).join(' ') || `Patient #${a.patient}`
   }`
 
-function NewPrescription({ appointments, preselect, onCreated }) {
+export function NewPrescription({ appointments = [], preselect, visit, onCreated }) {
   const [appointmentId, setAppointmentId] = useState(preselect || '')
   const [items, setItems] = useState([{ ...emptyItem }])
   const [notes, setNotes] = useState('')
@@ -26,18 +26,18 @@ function NewPrescription({ appointments, preselect, onCreated }) {
     e.preventDefault()
     setError('')
     const clean = items.filter((it) => it.medicine_name.trim())
-    if (!appointmentId) return setError('Select an appointment')
+    if (!appointmentId && !visit) return setError('Select an appointment')
     if (!clean.length) return setError('Add at least one medicine')
     setBusy(true)
     try {
-      await prescriptionApi.create(appointmentId, {
+      const { data } = await (visit ? workforceApi.signVisitPrescription : prescriptionApi.create)(visit || appointmentId, {
         notes,
         items: clean.map((it) => ({ ...it, quantity: Number(it.quantity) || 1 })),
       })
       setItems([{ ...emptyItem }])
       setNotes('')
       setAppointmentId('')
-      onCreated()
+      onCreated(data)
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not create prescription')
     } finally {
@@ -47,12 +47,12 @@ function NewPrescription({ appointments, preselect, onCreated }) {
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <Select label="Confirmed appointment" value={appointmentId} onChange={(e) => setAppointmentId(e.target.value)} required>
+      {!visit && <Select label="Confirmed appointment" value={appointmentId} onChange={(e) => setAppointmentId(e.target.value)} required>
         <option value="">Select an appointment…</option>
         {appointments.map((a) => (
           <option key={a.id} value={a.id}>{apptLabel(a)}</option>
         ))}
-      </Select>
+      </Select>}
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -64,6 +64,7 @@ function NewPrescription({ appointments, preselect, onCreated }) {
         {items.map((it, i) => (
           <div key={i} className="border border-slate-200 rounded-lg p-3 grid grid-cols-2 md:grid-cols-3 gap-3 relative">
             <Input label="Medicine name" value={it.medicine_name} onChange={setItem(i, 'medicine_name')} placeholder="Amoxicillin" />
+            <Input label="Route" value={it.route || ''} onChange={setItem(i, 'route')} />
             <Input label="Dosage" value={it.dosage} onChange={setItem(i, 'dosage')} placeholder="500mg" />
             <Input label="Frequency" value={it.frequency} onChange={setItem(i, 'frequency')} placeholder="3x daily" />
             <Input label="Duration" value={it.duration} onChange={setItem(i, 'duration')} placeholder="7 days" />

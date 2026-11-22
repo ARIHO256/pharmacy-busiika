@@ -1,3 +1,5 @@
+import OrderIssues from './OrderIssues'
+import { usePharmacyPermissions } from './PharmacyPermissions'
 import OrderReceipt from './OrderReceipt'
 import { useAuth } from '../../auth/AuthContext'
 import { servicesApi } from '../../api/endpoints'
@@ -18,18 +20,27 @@ const statusLabel = {
 }
 
 export default function Orders() {
+  const allows = usePharmacyPermissions()
   const { data: orders, loading, error, reload } = useApi(() => servicesApi.orders())
   const { user } = useAuth()
+  const [issues, setIssues] = useState(null)
+  const [exceptionsOnly, setExceptionsOnly] = useState(false)
   const [receiptOrder, setReceiptOrder] = useState(null)
-  const canRecordPayment = ['pharmacy', 'pharmacist', 'facility_manager', 'cashier'].includes(user?.role)
+  const canRecordPayment = allows('payment') && ['pharmacy', 'pharmacist', 'facility_manager', 'cashier'].includes(user?.role)
   const [updating, setUpdating] = useState(null)
   const [handover, setHandover] = useState(null)
+  const [pickup, setPickup] = useState(null)
   const [reference, setReference] = useState('')
   const [actionError, setActionError] = useState('')
 
   const setStatus = async (order, status, fields) => {
     if (!status) return
     setActionError('')
+    if (status === 'ready' && !fields && user?.role === 'pharmacy') {
+      setPickup(order)
+      setReference('')
+      return
+    }
     if (status === 'delivered' && !fields) {
       setHandover(order)
       setReference('')
@@ -39,6 +50,7 @@ export default function Orders() {
     try {
       await servicesApi.updateOrder(order.id, status, fields)
       setHandover(null)
+      setPickup(null)
       reload()
     } catch (e) {
       setActionError(errMsg(e))
@@ -49,13 +61,15 @@ export default function Orders() {
 
   return (
     <LoadingOrError loading={loading} error={error}>
-      <Card title="Customer orders">
+      <Card title="Customer orders" actions={<Button variant="outline" aria-pressed={exceptionsOnly}
+        onClick={() => setExceptionsOnly(!exceptionsOnly)}>{exceptionsOnly ? 'Show all orders' : 'Show open issues'}</Button>}>
         {actionError && !handover && <Alert tone="danger">{actionError}</Alert>}
         <Table
           empty="No orders yet"
           columns={[
             { key: 'id', label: 'Order', render: (o) => <span className="font-medium text-slate-800">#{o.id}</span> },
-            { key: 'patient_name', label: 'Patient' },
+            { key: 'patient_name', label: 'Buyer' },
+            { key: 'open_issues', label: 'Issues', render: (row) => <Button variant="outline" onClick={() => setIssues(row)}>{row.open_issues || 'View'}</Button> },
             {
               key: 'items',
               label: 'Items',
@@ -71,7 +85,7 @@ export default function Orders() {
             },
             { key: 'total', label: 'Total', render: (o) => money(o.total) },
             { key: 'payment_recorded', label: 'Payment', render: (o) => (
-              o.payment_recorded || (canRecordPayment && o.status !== 'cancelled' && o.total > 0)
+              (o.payment_recorded && allows('receipt_print')) || (!o.payment_recorded && !o.credit && canRecordPayment && o.status !== 'cancelled' && o.total > 0)
                 ? <Button variant="outline" onClick={() => setReceiptOrder(o)}>
                     {o.payment_recorded ? 'Print receipt' : 'Record payment'}
                   </Button>
@@ -100,7 +114,7 @@ export default function Orders() {
               key: 'actions',
               label: 'Update',
               render: (o) =>
-                (user?.role !== 'cashier' && (o.status === 'confirmed' || nextOptions[o.status])) ? (
+                (allows('fulfil') && user?.role !== 'cashier' && (o.status === 'confirmed' || nextOptions[o.status])) ? (
                   <Select
                     value=""
                     disabled={updating === o.id}
@@ -108,7 +122,7 @@ export default function Orders() {
                     className="min-w-36"
                   >
                     <option value="">Set status…</option>
-                    {(o.status === 'confirmed' ? [o.delivery ? 'dispatched' : 'ready', 'cancelled'] : nextOptions[o.status]).filter((s) => s !== 'cancelled' || !o.payment_recorded).map((s) => (
+                    {(o.status === 'confirmed' ? [o.delivery ? 'dispatched' : 'ready', 'cancelled'] : nextOptions[o.status]).filter((s) => s !== 'cancelled' || (user?.role === 'pharmacy' && !o.payment_recorded && !o.credit)).map((s) => (
                       <option key={s} value={s}>
                         {statusLabel[s]}
                       </option>
@@ -119,10 +133,18 @@ export default function Orders() {
                 ),
             },
           ]}
-          rows={orders || []}
+          rows={(orders || []).filter((row) => !exceptionsOnly || row.open_issues)}
         />
       </Card>
+      {issues && <OrderIssues order={issues} canWrite={allows('fulfil') && user?.role !== 'cashier'} onClose={() => { setIssues(null); reload() }} />}
       {receiptOrder && <OrderReceipt order={receiptOrder} onClose={() => setReceiptOrder(null)} onRecorded={reload} />}
+      {pickup && <Modal open title={`Pickup instructions · Order #${pickup.id}`} onClose={() => { if (updating === null) setPickup(null) }}>
+        <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); setStatus(pickup, 'ready', { pickup_instructions: reference }) }}>
+          {actionError && <Alert tone="danger">{actionError}</Alert>}
+          <Input label="Instructions for the buyer" maxLength={500} value={reference} onChange={(e) => setReference(e.target.value)} />
+          <Button disabled={updating !== null}>Mark ready for pickup</Button>
+        </form>
+      </Modal>}
       {handover && <Modal open title={`Record handover · Order #${handover.id}`}
         onClose={() => { if (updating === null) setHandover(null) }}>
         <form className="space-y-3" onSubmit={(event) => {
